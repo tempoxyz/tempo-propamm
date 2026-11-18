@@ -1,0 +1,152 @@
+name: Main
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/verify.yml # zizmor: ignore[self-repository] actionlint does not support $/ references yet.
+
+  # Checks the USDY adapter against Ondo's official Ethereum USDY oracle on a
+  # mainnet fork. Non-blocking failures signal interface drift (or RPC flakiness).
+  mainnet-fork:
+    name: Mainnet Fork Suite (non-blocking)
+    if: ${{ always() }}
+    continue-on-error: true
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FOUNDRY_PROFILE: ci
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: '1'
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - name: Run the Ethereum mainnet fork tests
+        run: forge test -vvv --match-path 'contracts/test/fork/*'
+
+  # The TypeScript SDK's releases (sdk/ts, @tempoxyz/propamm-sdk), the way tempoxyz/accounts releases: with changesets
+  # pending, `version` opens or updates the "chore(sdk-ts): version packages" pull request (package.json, CHANGELOG.md,
+  # src/version.ts); once that is merged and none are left, `publish` publishes the new version to npm through trusted
+  # publishing (OIDC, no npm token) and tags it with a GitHub release. Both run in sdk/ts.
+  version:
+    name: Version (TypeScript SDK)
+    needs: verify
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs['has-changesets'] }}
+    # The release commit and pull request go through the GitHub API with a short-lived GitHub App token minted by the
+    # github-sts action (authorized by .github/sts/changesets.sts.yaml); the built-in GITHUB_TOKEN may not open pull
+    # requests.
+    permissions:
+      contents: read # to clone repository contents
+      id-token: write # to request the OIDC token the STS exchange verifies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: sdk/ts
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      # Full history: `changeset version` finds the commit that added each changeset for CHANGELOG.md, and on a shallow
+      # clone it fetches more history for that, which needs no credentials (the checkout keeps none, and the
+      # repository is public).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Fetch GitHub token via STS
+        id: sts
+        uses: tempoxyz/gh-actions/actions/github-sts@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          policy: changesets
+
+      - name: Create or update the release pull request
+        id: changesets
+        uses: tempoxyz/gh-actions/vendor/changesets/action@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          cwd: sdk/ts
+          github-token: ${{ steps.sts.outputs.token }}
+          pr-title: 'chore(sdk-ts): version packages'
+          commit-message: 'chore(sdk-ts): version packages'
+          version-script: npm run changeset:version
+
+  publish:
+    name: Publish (TypeScript SDK)
+    if: needs.version.outputs.hasChangesets == 'false'
+    needs: version
+    permissions:
+      contents: write # to push the release tag and create the GitHub release
+      id-token: write # to publish to npm through trusted publishing (OIDC)
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: sdk/ts
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Check npm supports trusted publishing
+        # npm 11.5.1 is the first CLI that exchanges the job's OIDC token for a publish token.
+        run: node scripts/check-npm.mjs 11.5.1
+
+      - name: Publish to npm
+        uses: tempoxyz/gh-actions/vendor/changesets/action@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        env:
+          NPM_CONFIG_IGNORE_SCRIPTS: 'true' # no dependency's lifecycle script runs; the publish script builds explicitly
+        with:
+          cwd: sdk/ts
+          create-github-releases: true
+          publish-script: npm run changeset:publish

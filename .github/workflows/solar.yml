@@ -1,0 +1,96 @@
+name: Solar differential
+
+# Runs the propAMM v2 and ManagedDirectPropAMM suites on contracts and tests compiled by solar
+# (https://github.com/paradigmxyz/solar) instead of solc, through bin/solar-diff: every test must pass as it does under
+# solc, and the job summary compares each test's gas with the committed solc snapshot. Not a required status: solar is
+# an experimental compiler, and nothing here deploys its output.
+#
+# Manual-only compiler evaluation: no PR, push or scheduled runs.
+# SECURITY: the selected Solar revision executes build scripts. Keep this workflow secretless.
+
+on:
+  workflow_dispatch:
+    inputs:
+      solar-ref:
+        description: The paradigmxyz/solar commit, branch or tag to build instead of SOLAR_REF
+        required: false
+        default: ''
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The solar commit the suites last passed with; bump it to try a newer compiler.
+  SOLAR_REF: 6a7d277c6230eec2e46128962cd0e9c8400a8bb3
+  FOUNDRY_DISABLE_NIGHTLY_WARNING: '1'
+
+jobs:
+  solar:
+    name: Solar differential
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    # Building solar takes about 2 minutes on four cores, the suites about 5, V2Invariant's campaign most of them.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: paradigmxyz/solar
+          ref: ${{ inputs.solar-ref || env.SOLAR_REF }}
+          path: .solar
+          persist-credentials: false
+
+      # Only a run on main that builds the pinned SOLAR_REF saves; a solar-ref override never seeds main's cache, so the
+      # cache other runs restore only ever holds the reviewed pin's build.
+      - uses: tempoxyz/gh-actions/vendor/Swatinem/rust-cache@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          workspaces: .solar -> target
+          save-if: ${{ github.ref == 'refs/heads/main' && (inputs.solar-ref == '' || inputs.solar-ref == env.SOLAR_REF) }}
+
+      - name: Build solar
+        # solar needs a newer Rust than the SDK's rust-toolchain.toml pins, so build it with the current stable.
+        working-directory: .solar
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable build --release --locked --bin solar
+          echo "SOLAR=$PWD/target/release/solar" >> "$GITHUB_ENV"
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          # The version verify.yml pins: gas and cheatcode behaviour change between releases.
+          version: v1.8.1
+          cache: 'false'
+
+      - name: Run the suites on solar
+        run: bin/solar-diff "0x${GITHUB_SHA:0:16}"
+
+      - name: Report
+        if: always()
+        run: |
+          if [ -f cache/solar/report.md ]; then
+            cat cache/solar/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: solar-differential
+          path: |
+            cache/solar/report.md
+            cache/solar/tests.json
+          if-no-files-found: warn
+          retention-days: 14

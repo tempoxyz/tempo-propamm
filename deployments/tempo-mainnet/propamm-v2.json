@@ -1,0 +1,19 @@
+{
+  "chainId": 4217,
+  "contracts": {
+    "registry": "0x0000000000000000000000000000000000000000",
+    "settler": "0xDD683c32d7379a8353b5b23E9a8159A2831F65b6",
+    "venueFactory": "0x7b71Cd1F47EB6b98fD5aF5167872ce378fc7136b",
+    "venueImplementation": "0xEc207E702C5eEC03b79fb687e82049ed60BF64F3"
+  },
+  "deployer": "0xcC4957A13A225eA1BfC85346D48B7de2Cb2cE374",
+  "deployerNonce": 235,
+  "deployerSignature": "0x37f812be388f2f98c9c1a56a918f2c891bddd2d984b278d98a9b09c76f2fa03a65c3c5ec8ec790263bc951c3e2c396d08f361965ca6b57c35694023abf5d57961b",
+  "network": "tempo-mainnet",
+  "provenanceVersion": 2,
+  "roles": {
+    "registryAdmin": "0x0000000000000000000000000000000000000000"
+  },
+  "startBlock": 46026014,
+  "status": "verified"
+}

@@ -1,0 +1,26 @@
+name: Scan GitHub Actions
+
+on:
+  # Run on every pull request: "Scan GitHub Actions" is a required status check, and a path filter
+  # here leaves pull requests that don't touch .github/** without the check, so they can never merge.
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * 1'
+
+permissions: {}
+
+jobs:
+  scan:
+    name: Scan GitHub Actions
+    uses: tempoxyz/gh-actions/.github/workflows/scan-github-actions.yml@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write

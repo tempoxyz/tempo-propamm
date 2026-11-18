@@ -1,0 +1,599 @@
+name: Verify
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FOUNDRY_PROFILE: ci
+  FOUNDRY_DISABLE_NIGHTLY_WARNING: '1'
+
+jobs:
+  # Parallel contract checks compile with source-pinned Solar.
+  build:
+    name: Format, lint and build
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Earn is external integration context, so initialize only the public build
+      # dependencies required for compilation instead of using submodules: recursive.
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          # Keep formatter and gas accounting reproducible; upgrade with the snapshot.
+          version: v1.8.1
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - name: Check formatting
+        run: forge fmt --check
+
+      - name: Check ladder vectors
+        # contracts/test/v2/LadderMathVectors.t.sol and integration/VenueVectors.t.sol, the Rust SDK's tests/vectors.rs and the
+        # TypeScript SDK's test/vectors.test.ts replay the committed JSON, so this holds it to the BigInt reference that
+        # generates it. It needs only the runner's preinstalled Node: no packages.
+        run: node contracts/test/vectors/ladder-reference.mjs --check
+
+      - name: Lint
+        run: forge lint
+
+      - name: Build
+        run: forge build
+
+      - name: Check deployable contract sizes
+        run: forge build --sizes
+
+  test:
+    name: Test (${{ matrix.suites }})
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    # Together the legs run every suite `forge test --no-match-path 'contracts/test/fork/*'` does, each from a compile
+    # of its own sources only: v1 and the managed pool, the other v2 suites, and V2Invariant, whose single-threaded
+    # campaign (about 4 minutes) is by far the longest suite, in two halves.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suites: v1 and managed
+          - suites: v2
+          - suites: V2 invariants 1/2
+            shard: 1
+          - suites: V2 invariants 2/2
+            shard: 2
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+          cache: 'false'
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      # `forge build --sizes` can populate a source-only cache that causes a
+      # subsequent test command to omit invariant artifacts. This job starts
+      # from a clean checkout, and `--force` keeps that guarantee explicit.
+      - name: Test v1 and the managed pool
+        if: matrix.suites == 'v1 and managed'
+        run: forge test --force -vvv --no-match-path 'contracts/test/{fork,v2}/**'
+
+      - name: Test v2
+        if: matrix.suites == 'v2'
+        run: >-
+          forge test --force -vvv --match-path 'contracts/test/v2/**'
+          --no-match-path 'contracts/test/v2/invariant/V2Invariant.t.sol'
+
+      - name: Test V2Invariant
+        if: matrix.shard
+        # Each half runs half of the ci profile's invariant runs, at the same depth and with its own random seed, so
+        # the two together run as many sequences as one campaign would.
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: 2
+        run: |
+          runs=$(forge config --json | jq -r '.invariant.runs')
+          share=$(( runs / SHARDS + (SHARD <= runs % SHARDS ? 1 : 0) ))
+          echo "Running $share of $runs invariant runs"
+          FOUNDRY_INVARIANT_RUNS=$share forge test --force -vvv --match-path 'contracts/test/v2/invariant/V2Invariant.t.sol'
+
+      - name: Replay seeded random vectors
+        if: matrix.suites == 'v2'
+        # contracts/test/vectors/fuzz.mjs writes a random set in the committed vectors' format from the BigInt reference,
+        # seeded by the commit. The Rust SDK and TypeScript SDK jobs write the same set, so all three implementations
+        # check the same random cases against the reference: here LadderMath, HotWord, ShapeWord and the venue's post,
+        # quote and fill. Only the two replay suites run, on the build above. Decoding a whole set at once expands memory
+        # past the default gas limit.
+        env:
+          FOUNDRY_GAS_LIMIT: '18446744073709551615'
+        run: |
+          node contracts/test/vectors/fuzz.mjs --seed "0x${GITHUB_SHA:0:16}" --scale 2 --out contracts/test/vectors/fuzz/ci.json
+          PROPAMM_VECTORS=contracts/test/vectors/fuzz/ci.json forge test -vvv --match-path 'contracts/test/v2/*Vectors.t.sol'
+
+  tempo:
+    name: Tempo precompile (${{ matrix.suites }})
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        suites: [managed, v2 access]
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+          cache: 'false'
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      # `--network tempo` runs Tempo's precompiles locally, with no RPC. The managed suites (pool, access, scripts)
+      # use the TIP-1022 address registry and TIP-20 factory tokens there instead of mocks, and a withdrawal to a
+      # registered virtual address must revert with nothing moved. The gas bounds behind the README's gas tables
+      # (contracts/test/fork/managed/ManagedDirectPropAMMGas.t.sol and contracts/test/fork/VenueAccessGas.t.sol) run only here, on
+      # Tempo's gas schedule, as do v2's venue access suites and the suite that holds MockTIP403Registry, which the
+      # v1 par pool deploy script's tests use, to the TIP-403 precompile. The two groups run as separate jobs.
+      - name: Test managed pools on Tempo precompiles
+        if: matrix.suites == 'managed'
+        run: forge test -vvv --network tempo --match-path 'contracts/test/{managed/**,fork/managed/**}'
+
+      - name: Test v2 access on Tempo precompiles
+        if: matrix.suites == 'v2 access'
+        run: |
+          forge test -vvv --network tempo --match-path 'contracts/test/*VenueAccess*'
+          forge test -vvv --network tempo --match-path 'contracts/test/v2/MockFidelity.t.sol'
+
+  snapshot:
+    name: Gas snapshot and Forge scripts
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - name: Check gas snapshot
+        # Compile the full snapshot input consistently: filtered builds can change via-IR test bytecode and gas when
+        # their partial artifacts are reused. The scripts below run from this compile.
+        run: forge snapshot --force --check --no-match-test '^(invariant_|testFuzz)' --no-match-path 'contracts/test/fork/*'
+
+      - name: Run DeployV2 as a Forge script
+        # `forge test` calls the deploy script like any contract, so it never applies the rules Forge enforces only in
+        # `forge script`, such as refusing `address(this)` in a script contract. This runs `DeployV2.run` as an operator
+        # would, then `run` and `verify` together (contracts/test/v2/script/DeployV2RunVerify.s.sol) on Moderato and on mainnet,
+        # whose branches only chain 4217 takes, as local simulations on the precompiles `--network tempo` provides: no
+        # RPC, no signer and nothing broadcast. The addresses hold no keys; the sender only has to be a real account
+        # rather than Forge's default sender.
+        env:
+          DEPLOYER: '0x7e57d2a1000000000000000000000000000c0de1'
+        run: |
+          forge script contracts/script/v2/DeployV2.s.sol:DeployV2 --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/v2/script/DeployV2RunVerify.s.sol:DeployV2RunVerify --sig 'runAndVerify()' \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/v2/script/DeployV2RunVerify.s.sol:DeployV2RunVerify --sig 'runAndVerify()' \
+            --network tempo --chain 4217 --sender "$DEPLOYER"
+
+      - name: Run the managed pool scripts as Forge scripts
+        # The same guard for DeployManagedPool and ManagedPoolAccess (contracts/test/managed/script/ManagedPoolScriptsRun.s.sol): two
+        # pairs on factory TIP-20s and pathUSD, deployed on Moderato by their owner and on mainnet for another owner's
+        # Safe, then one pool through a sponsor's whole life, lists, a denial and the pair's modes, ending in a CHECK
+        # that must find nothing. Router replay also checks ordinary home/sponsor membership through ownership
+        # handoff and independent membership revocations. Local simulations on `--network tempo`: no RPC, no signer and nothing broadcast.
+        env:
+          DEPLOYER: '0x7e57d2a1000000000000000000000000000c0de1'
+        run: |
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedPoolRun --sig 'runWithPairs()' \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedPoolRun --sig 'runWithPairs()' \
+            --network tempo --chain 4217 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:ManagedPoolAccessRun --sig 'runModes()' \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:ManagedPoolRouterReplayRun --sig 'runReplay()' \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:ManagedPoolRouterReplayRun --sig 'runReplay()' \
+            --network tempo --chain 4217 --sender "$DEPLOYER"
+          DEPLOYER_ADDRESS="$DEPLOYER" BROADCAST=false forge script contracts/script/managed/DeployManagedCore.s.sol \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          DEPLOYER_ADDRESS="$DEPLOYER" BROADCAST=false forge script contracts/script/managed/DeployManagedCore.s.sol \
+            --network tempo --chain 4217 --sender "$DEPLOYER"
+
+  sdk:
+    name: Rust SDK
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        # rustup reads rust-toolchain.toml, including rustfmt and clippy.
+        run: rustup show
+
+      # Only main saves, so pull requests restore its dependencies without uploading their own.
+      - uses: tempoxyz/gh-actions/vendor/Swatinem/rust-cache@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint SDK and examples
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test SDK
+        run: cargo test --workspace --locked
+
+      - name: Replay seeded random vectors
+        # The commit's random set (see the Test job's step of the same name): the SDK's hot words, prices, shapes, post
+        # batches and post outcomes.
+        run: |
+          node contracts/test/vectors/fuzz.mjs --seed "0x${GITHUB_SHA:0:16}" --scale 2 --out contracts/test/vectors/fuzz/ci.json
+          PROPAMM_VECTORS=contracts/test/vectors/fuzz/ci.json cargo test -p propamm-sdk --test vectors --locked
+
+      - name: Check API documentation
+        env:
+          RUSTDOCFLAGS: '-D warnings'
+        run: cargo doc --workspace --no-deps --locked
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - name: Build contracts and test SDK on local Anvil
+        # sdk/rust/tests/onchain.rs deploys these contracts and installs the test TIP-20 factory runtime from out/.
+        # Build all four artifacts explicitly; the Format, lint and build job compiles everything.
+        run: |
+          forge build contracts/src/v2/Venue.sol contracts/src/v2/VenueFactory.sol contracts/test/v2/mocks/MockTIP20V2.sol contracts/test/v2/utils/TIP20FactoryMock.sol
+          cargo test -p propamm-sdk --test onchain --locked -- --ignored
+
+  ts-sdk:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/ts
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@947d9a3ccb2425a9c94d563fd721cc0e33c89e26 # 2026-10-15T00-15-06Z-947d9a3c
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        working-directory: .
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      # Forge builds the v2 sources the ABIs are generated from, and Anvil runs the end-to-end suites. The unit tests
+      # need no Foundry.
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@947d9a3ccb2425a9c94d563fd721cc0e33c89e26 # 2026-10-15T00-15-06Z-947d9a3c
+        with:
+          version: v1.8.1
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Format, lint and import order
+        # Biome under biome.json, writing nothing: formatting, the lint rules and sorted imports, src/generated included
+        # (scripts/gen.mjs formats what it writes). `npx biome check --write .` fixes them locally (`npm run format` only
+        # formats).
+        run: npm run check
+
+      - name: Typecheck the documentation examples
+        # Every ```ts block in src/**/*.ts JSDoc and README.md, each as its own module importing @tempoxyz/propamm-sdk by
+        # name, against declarations built from src/ into a temporary node_modules (scripts/check-examples.mjs). A
+        # broken example fails with its file and line. Needs no Foundry.
+        run: npm run examples:check
+
+      - name: Build the v2 contracts
+        # Only contracts/src/v2, ITIP20 and the mock hook the e2e suite deploys (contracts/test/v2/mocks), into
+        # sdk/ts/.forge, so the root out/ and cache/ the other jobs' filtered via-IR builds share are never touched.
+        # About 2 seconds.
+        run: npm run contracts:build
+
+      - name: Check the generated ABIs, enums and constants
+        run: npm run gen:check
+
+      - name: Unit tests
+        # Vitest's unit project, which includes the replay of contracts/test/vectors/propamm-v2-ladder.json and a seeded
+        # fuzz against contracts/test/vectors/ladder-reference.mjs, and its type-level project (test/*.test-d.ts).
+        run: npm test
+
+      - name: Replay seeded random vectors
+        # The commit's random set (see the Test job's step of the same name), through the SDK; the Anvil step below
+        # replays its venue sections through the deployed core.
+        run: |
+          node ../../contracts/test/vectors/fuzz.mjs --seed "0x${GITHUB_SHA:0:16}" --scale 2 --out ../../contracts/test/vectors/fuzz/ci.json
+          PROPAMM_VECTORS=contracts/test/vectors/fuzz/ci.json npm run test:vectors
+
+      - name: Build and check the package
+        # tsc into dist/, then publint (strict) and are-the-types-wrong on the packed tarball (ESM only: the CommonJS
+        # and node10 resolutions are out of scope).
+        run: npm run check:package
+
+      - name: End-to-end tests on local Anvil
+        # Vitest's e2e project, one file at a time: each starts its own `anvil --network tempo` and deploys the core as
+        # DeployV2 does. No RPC, dev keys only.
+        run: npm run test:e2e
+
+      - name: Replay seeded random vectors on local Anvil
+        env:
+          PROPAMM_VECTORS: contracts/test/vectors/fuzz/ci.json
+        run: npm run test:e2e:vectors
+
+  contracts:
+    # Preserve the required status name; the Solidity, Rust and TypeScript jobs must all pass.
+    name: Contracts
+    if: ${{ always() }}
+    needs: [build, test, tempo, snapshot, sdk, ts-sdk]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - name: Require every contracts and SDK job to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Contracts jobs: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "A contracts job ended $result"
+              exit 1
+            fi
+          done
+
+  # The coverage profile is ci's, with fewer fuzz and invariant sequences for the managed differentials and invariant
+  # campaign only (their inline `coverage.` config; see foundry.toml). Coverage instruments every call, which makes
+  # V2Invariant's campaign by far the longest suite, so its runs are split across the coverage-invariant jobs and every
+  # other suite runs in coverage-suites. `coverage` merges their reports into the summary and the required status.
+  coverage-suites:
+    name: Coverage (suites)
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - name: Generate coverage
+        env:
+          FOUNDRY_PROFILE: coverage
+        run: >-
+          forge coverage --ir-minimum --report summary --report lcov --exclude-tests
+          --no-match-coverage '^contracts/script/'
+          --no-match-path 'contracts/test/{fork/*,v2/invariant/V2Invariant.t.sol}'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-suites
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  coverage-invariant:
+    name: Coverage (V2 invariants ${{ matrix.shard }}/4)
+    runs-on: ${{ vars.DEPOT_ENABLED == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize build submodules
+        run: git submodule update --init lib/forge-std lib/openzeppelin-contracts
+
+      - uses: tempoxyz/gh-actions/actions/setup-foundry@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+        with:
+          version: v1.8.1
+          cache: 'false'
+
+      - name: Install source-pinned Solar
+        working-directory: .
+        run: bin/install-solar
+
+      - name: Generate coverage
+        # Each shard runs its share of the coverage profile's invariant runs, at the same depth and with its own random
+        # seed, so the four together run as many sequences as one campaign would.
+        env:
+          FOUNDRY_PROFILE: coverage
+          SHARD: ${{ matrix.shard }}
+          SHARDS: 4
+        run: |
+          runs=$(forge config --json | jq -r '.invariant.runs')
+          share=$(( runs / SHARDS + (SHARD <= runs % SHARDS ? 1 : 0) ))
+          echo "Running $share of $runs invariant runs"
+          FOUNDRY_INVARIANT_RUNS=$share forge coverage --ir-minimum --report summary --report lcov --exclude-tests \
+            --no-match-coverage '^contracts/script/' \
+            --match-path 'contracts/test/v2/invariant/V2Invariant.t.sol'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-invariant-${{ matrix.shard }}
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  coverage:
+    # Preserve the required status name: every coverage job must pass.
+    name: Coverage
+    if: ${{ always() }}
+    needs: [coverage-suites, coverage-invariant]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@35019557465e3c38ee3468be171771fd73577584 # 2026-10-20T06-22-38Z-35019557
+
+      - name: Require every coverage job to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Coverage jobs: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "A coverage job ended $result"
+              exit 1
+            fi
+          done
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-*
+          path: coverage
+
+      - name: Coverage baseline
+        # Sums the jobs' LCOV hit counts per line, function (overloads by their order) and branch.
+        run: |
+          python3 - coverage/*/lcov.info <<'EOF'
+          import sys
+          from collections import defaultdict
+          lines, funcs, branches = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
+          for path in sys.argv[1:]:
+              for record in open(path):
+                  tag, _, value = record.strip().partition(":")
+                  if tag == "SF":
+                      source, seen = value, defaultdict(int)
+                  elif tag == "DA":
+                      line, hits = value.split(",")[:2]
+                      lines[source][line] += int(hits)
+                  elif tag == "FNDA":
+                      hits, name = value.split(",", 1)
+                      seen[name] += 1
+                      funcs[source][name, seen[name]] += int(hits)
+                  elif tag == "BRDA":
+                      *branch, taken = value.split(",")
+                      branches[source][tuple(branch)] += 0 if taken == "-" else int(taken)
+          def pct(counts):
+              hit = sum(1 for count in counts if count)
+              return f"{100 * hit / len(counts):.2f}% ({hit}/{len(counts)})" if counts else "-"
+          rows = [(s, pct(lines[s].values()), pct(branches[s].values()), pct(funcs[s].values())) for s in sorted(lines)]
+          total = [sum(([*m[s].values()] for s in lines), []) for m in (lines, branches, funcs)]
+          rows.append(("Total", *(pct(counts) for counts in total)))
+          print(f"| {'File':<50} | {'% Lines':<20} | {'% Branches':<20} | {'% Funcs':<20} |")
+          for row in rows:
+              print("| " + " | ".join(f"{cell:<{50 if i == 0 else 20}}" for i, cell in enumerate(row)) + " |")
+          EOF

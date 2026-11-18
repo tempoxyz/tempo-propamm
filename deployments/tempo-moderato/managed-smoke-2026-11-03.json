@@ -1,0 +1,374 @@
+{
+  "chain": 42431,
+  "sourceCommit": "09836b51e5ac00613c9e67206130fbd8f89ecc68",
+  "owner": "0x3899f7e09af9F6A462Ab8943a147dbF82a7cFf03",
+  "base": "0x20c0000000000000000000000000000000000001",
+  "quote": "0x20c0000000000000000000000000000000000002",
+  "receipts": [
+    {
+      "label": "faucet",
+      "hash": "0x52f62bc51602d2a2f85008f545b90412f05fe3a1094e527777ce81b29899cc37",
+      "status": "success",
+      "block": "42460104",
+      "gasUsed": "58735",
+      "contractAddress": null
+    },
+    {
+      "label": "faucet",
+      "hash": "0xbc7f6830ecf3994801472a170d26ea670db88bb1aceab252740fc5e3fc049e33",
+      "status": "success",
+      "block": "42460104",
+      "gasUsed": "307735",
+      "contractAddress": null
+    },
+    {
+      "label": "faucet",
+      "hash": "0xf8da27cb87be7dedd3a1577210e0a706687659125353d64163eb8bebc0d7abf0",
+      "status": "success",
+      "block": "42460104",
+      "gasUsed": "307735",
+      "contractAddress": null
+    },
+    {
+      "label": "faucet",
+      "hash": "0xf1c5825796f22c0042a917c2c40f85d73a5ab82ccd548bac5cf57ed99610ab16",
+      "status": "success",
+      "block": "42460104",
+      "gasUsed": "307735",
+      "contractAddress": null
+    },
+    {
+      "label": "faucet",
+      "hash": "0x4f7d8840c5e650f6137cf2fc7b3838e7c18abcad8aafff59e92f8f8e6daa5e03",
+      "status": "success",
+      "block": "42460104",
+      "gasUsed": "307735",
+      "contractAddress": null
+    },
+    {
+      "label": "deploy PoolFactory",
+      "hash": "0xdecd8ff0da0b052e86f16d4170ea8a34f239646cd52382e7ee4f446eacd89940",
+      "status": "success",
+      "block": "42460106",
+      "gasUsed": "17468327",
+      "contractAddress": "0x04b9a42a64ab7f8a92abf72363d826de52bc804c"
+    },
+    {
+      "label": "createPool",
+      "hash": "0xaa0dcde587e8ddcf5f19ae8e87d14ac3ea8d60a0996674d893dc879adcae1f95",
+      "status": "success",
+      "block": "42460108",
+      "gasUsed": "1373492",
+      "contractAddress": null
+    },
+    {
+      "label": "deploy MockOracle",
+      "hash": "0x6cfae13c25884e73383ad62dc5ab00b459573f6b24177cc86541e2afa141df0a",
+      "status": "success",
+      "block": "42460110",
+      "gasUsed": "1213582",
+      "contractAddress": "0xb51cc4628b4f294b285547be3f611c8dbd725213"
+    },
+    {
+      "label": "addPair",
+      "hash": "0xfc85b48fdf11a0450e145bb8171cb5e25e346d35590410696ffd9ac8fdcb578f",
+      "status": "success",
+      "block": "42460111",
+      "gasUsed": "1312737",
+      "contractAddress": null
+    },
+    {
+      "label": "setMembers",
+      "hash": "0x25771fb7ee8aed734ea7ddf872f5e6ac998a7fdbeeef6b7f8767a47ab9de7701",
+      "status": "success",
+      "block": "42460113",
+      "gasUsed": "286610",
+      "contractAddress": null
+    },
+    {
+      "label": "setPairAccess",
+      "hash": "0xc16d9f3ed951dbcb8afd4486dedb44fb8de84e25e80f95219803e32aa0e1b2e0",
+      "status": "success",
+      "block": "42460114",
+      "gasUsed": "554565",
+      "contractAddress": null
+    },
+    {
+      "label": "approve",
+      "hash": "0x1ab25391c3fe2d0dcf6c6a4fe61ad8e5dccd94084bea5741d6ece272bc605567",
+      "status": "success",
+      "block": "42460116",
+      "gasUsed": "277942",
+      "contractAddress": null
+    },
+    {
+      "label": "fund",
+      "hash": "0xfb1a4543f6663cf3011ceb78f6de0dba5a39f34c9fc5ea2728eaca46d5f0b7fc",
+      "status": "success",
+      "block": "42460117",
+      "gasUsed": "67340",
+      "contractAddress": null
+    },
+    {
+      "label": "approve",
+      "hash": "0x68643e18e93716e10bd2b886b2c1c970f7cc8774f10fba0f35d211cc3d40f0df",
+      "status": "success",
+      "block": "42460119",
+      "gasUsed": "277930",
+      "contractAddress": null
+    },
+    {
+      "label": "approve",
+      "hash": "0x2a6f26a0018d7213179f379344408fe5de76eefef7eab850d205a92f81fb7649",
+      "status": "success",
+      "block": "42460120",
+      "gasUsed": "277942",
+      "contractAddress": null
+    },
+    {
+      "label": "fund",
+      "hash": "0x5b69062dcb7ed6a2f6c83868736c50a1b887d47861f958dc511c03530f2bc454",
+      "status": "success",
+      "block": "42460122",
+      "gasUsed": "67340",
+      "contractAddress": null
+    },
+    {
+      "label": "approve",
+      "hash": "0xa0ae8bebcaee7f4137aa3542d23fe39c14608d90ef4315fb003c96f495eda2ee",
+      "status": "success",
+      "block": "42460124",
+      "gasUsed": "277930",
+      "contractAddress": null
+    },
+    {
+      "label": "unpause",
+      "hash": "0x38664c61b4de0c724648272ad163605ad8f154092f789aff28bd87481acca013",
+      "status": "success",
+      "block": "42460125",
+      "gasUsed": "29944",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0xbdd7451651daf511fb337881621e180d037858bfb51455207139465220bf8f6a",
+      "status": "success",
+      "block": "42460127",
+      "gasUsed": "129314",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0x11e239f3b4b8ab92384da9f30e9a34c02bce2fe5c9dec68fce2c60e8f7c608ae",
+      "status": "success",
+      "block": "42460130",
+      "gasUsed": "386117",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0x3bd825f19d8ad0f5f67dcec306d2ef091920168c518ad3ea2a11ddf1e182e9f9",
+      "status": "success",
+      "block": "42460133",
+      "gasUsed": "137014",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0xcfe2a7d5bc92c3f841961b5ce56aa8ee7fec4277ce0c3a09339535adbf15a128",
+      "status": "success",
+      "block": "42460136",
+      "gasUsed": "133880",
+      "contractAddress": null
+    },
+    {
+      "label": "closePair",
+      "hash": "0x3ddfaf14dd998d18dfab92829be5b22e2e7f59408b116b083b03c669e95210ce",
+      "status": "success",
+      "block": "42460138",
+      "gasUsed": "33395",
+      "contractAddress": null
+    },
+    {
+      "label": "setTakerFees",
+      "hash": "0x4ad84628b75cacbc60574f68d4ce5fdadc2b6f47fb0d1e2a1613e37340136ea8",
+      "status": "success",
+      "block": "42460139",
+      "gasUsed": "41056",
+      "contractAddress": null
+    },
+    {
+      "label": "setPairAccess",
+      "hash": "0x622611b96fcf3144335298b8d16d59913646296dd3d379c9b07580e3cef02ad8",
+      "status": "success",
+      "block": "42460140",
+      "gasUsed": "48764",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0x9700f3d2de9b440fb762c5bf5bb37f86ce67171fbd2131253207926b028a5b02",
+      "status": "success",
+      "block": "42460142",
+      "gasUsed": "131708",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0x62239cf4fffed7f1091dda0554d02302183ae1d962eb58153cdfa7ea14f7fe5e",
+      "status": "success",
+      "block": "42460144",
+      "gasUsed": "388840",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0xcbd16b817182dc9ce50803766d997614e5f942f04911eb00a1329d37fa549bd2",
+      "status": "success",
+      "block": "42460147",
+      "gasUsed": "134540",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0x22f1798063907377cd06e6ed25f96e10f8f6a58d06d10426243960e98841e88a",
+      "status": "success",
+      "block": "42460150",
+      "gasUsed": "136803",
+      "contractAddress": null
+    },
+    {
+      "label": "pause",
+      "hash": "0x9cf22bf9a4e4eed12ca6abdc40fb46014371b939d5c8663da8da02a61f2790df",
+      "status": "success",
+      "block": "42460153",
+      "gasUsed": "30071",
+      "contractAddress": null
+    },
+    {
+      "label": "unpause",
+      "hash": "0x75e2e985eddf0b0257ababde4a86b00d404a0af9e58b34ecba1807f4782055eb",
+      "status": "success",
+      "block": "42460155",
+      "gasUsed": "29944",
+      "contractAddress": null
+    },
+    {
+      "label": "setDenied",
+      "hash": "0x63e54049bb1d04951e86a43b360b126a9d7b05a2b92725b38920df3656a1267d",
+      "status": "success",
+      "block": "42460157",
+      "gasUsed": "286480",
+      "contractAddress": null
+    },
+    {
+      "label": "setDenied",
+      "hash": "0xce4a826f9e6388a95aff9be20b31ab94bdf0eac8bb778e43cdf85e7ed6a36339",
+      "status": "success",
+      "block": "42460159",
+      "gasUsed": "42062",
+      "contractAddress": null
+    },
+    {
+      "label": "deploy Settler",
+      "hash": "0x253545e6e58526dcb33cacf674fed36fd5498b082546c8427b0839df13c07392",
+      "status": "success",
+      "block": "42460161",
+      "gasUsed": "2446964",
+      "contractAddress": "0xabe1ddf948827afa234c991079ae35b90bfb210f"
+    },
+    {
+      "label": "setSettler",
+      "hash": "0x142c70f2a591a131a2f41de1fd6b5a8e7dbea996774ef68519b6e85bc3d8d795",
+      "status": "success",
+      "block": "42460163",
+      "gasUsed": "32965",
+      "contractAddress": null
+    },
+    {
+      "label": "approve",
+      "hash": "0x09c577fdc37382c43274800521c6fbad99797e8dd47f223f51e422e9a82fe39b",
+      "status": "success",
+      "block": "42460165",
+      "gasUsed": "277942",
+      "contractAddress": null
+    },
+    {
+      "label": "approve",
+      "hash": "0xe843e1fe4e67be128db343833044796dbcee1398958251293c09fe66d3a65d2d",
+      "status": "success",
+      "block": "42460167",
+      "gasUsed": "277942",
+      "contractAddress": null
+    },
+    {
+      "label": "swap",
+      "hash": "0x8afea14ec015b6f0b9e270dea7f1c5adf079c67c8e35cf3db871e2c6aaf6e596",
+      "status": "success",
+      "block": "42460170",
+      "gasUsed": "131774",
+      "contractAddress": null
+    },
+    {
+      "label": "setSettler",
+      "hash": "0x50a44c10dcddb9efcd70598a9eaf4ec303142e9bca2c727b9eacbbb6d82fef05",
+      "status": "success",
+      "block": "42460173",
+      "gasUsed": "32953",
+      "contractAddress": null
+    },
+    {
+      "label": "pause",
+      "hash": "0x1ac0ed900c5c768493f60c5cc10e65bea1987e67558c77638b4783ed190ba393",
+      "status": "success",
+      "block": "42460175",
+      "gasUsed": "30071",
+      "contractAddress": null
+    },
+    {
+      "label": "withdraw",
+      "hash": "0x603cd113d645a307bbd151990928de4e06927605a41d7166664cbdc2ef2347f8",
+      "status": "success",
+      "block": "42460177",
+      "gasUsed": "59735",
+      "contractAddress": null
+    },
+    {
+      "label": "withdraw",
+      "hash": "0x577a918bca1fbdd9eb8ed2b70185e48aa9bb223e8fe46ab5428dedb892371317",
+      "status": "success",
+      "block": "42460179",
+      "gasUsed": "59735",
+      "contractAddress": null
+    }
+  ],
+  "factory": "0x04b9a42a64ab7f8a92abf72363d826de52bc804c",
+  "implementation": "0x5FCD5ebc77d2EB3890fc492cd432F92535aC0818",
+  "settler": "0x8FFaC1a8838f5023Da179D77979f4Aec006e115c",
+  "pool": "0x9a87f82B9802477fE04E0E4ee096Ea113B71600b",
+  "oracle": "0xb51cc4628b4f294b285547be3f611c8dbd725213",
+  "replacementSettler": "0xabe1ddf948827afa234c991079ae35b90bfb210f",
+  "result": "passed",
+  "cleanedUp": true,
+  "assertions": 48,
+  "runtimeVerification": [
+    {
+      "contract": "PoolFactory",
+      "address": "0x04b9a42a64ab7f8a92abf72363d826de52bc804c",
+      "codeHash": "0x7d4a98e82fcb1738deb143d786bd88e6064f60b431ef5d528485dbcc792fdaba",
+      "matchesSourceExcludingImmutables": true
+    },
+    {
+      "contract": "ManagedDirectPropAMM",
+      "address": "0x5FCD5ebc77d2EB3890fc492cd432F92535aC0818",
+      "codeHash": "0x8b2646c8689228b31d44cd50b033add0015f117fc5556e03ba32d8e55a39da91",
+      "matchesSourceExcludingImmutables": true
+    },
+    {
+      "contract": "Settler",
+      "address": "0x8FFaC1a8838f5023Da179D77979f4Aec006e115c",
+      "codeHash": "0x9d9ae1890998616a30a7ac80d692bd5fa90fd0b2244cbee9a94b63480488741e",
+      "matchesSourceExcludingImmutables": true
+    }
+  ]
+}

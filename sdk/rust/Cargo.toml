@@ -1,0 +1,23 @@
+[package]
+name = "propamm-sdk"
+version = "0.1.0"
+description = "Rust market-maker SDK for propAMM v2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+# Bindings read the canonical Solidity interfaces in this checkout. Use a path or
+# Git dependency until a standalone crates.io release packages those interfaces.
+publish = false
+
+[dependencies]
+alloy.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+proptest = "1"
+serde_json = "1"
+
+[lints]
+workspace = true

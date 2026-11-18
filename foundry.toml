@@ -1,0 +1,47 @@
+[profile.default]
+src = "contracts/src"
+test = "contracts/test"
+script = "contracts/script"
+out = "out"
+libs = ["lib"]
+solc = "bin/solar-solc"
+auto_detect_solc = false
+# Do not reuse the retired solc compiler cache.
+cache_path = "cache/solar"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+# Nested dependency checkouts must not change compiler metadata or deployment gas.
+auto_detect_remappings = false
+# Match the pinned CI toolchain's transaction-isolated gas accounting explicitly.
+isolate = true
+fs_permissions = [
+    { access = "read", path = "./contracts/test/vectors" },
+    # contracts/script/v2/DeployV2.s.sol writes (and `verify` re-reads) deployments/<network>/propamm-v2.json.
+    { access = "read-write", path = "./deployments" },
+    # contracts/test/v2/DeployV2.t.sol writes its manifests here instead of into deployments/.
+    { access = "read-write", path = "./cache/propamm-v2-deploy-test" },
+]
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/",
+    "openzeppelin-contracts/=lib/openzeppelin-contracts/",
+]
+
+[profile.ci]
+fuzz = { runs = 1024 }
+invariant = { runs = 256, depth = 32 }
+
+# The Coverage job (verify.yml): the ci profile's values, and every test's inline `ci.` config is repeated as
+# `coverage.`, so every suite runs as in the Test job except the managed v1 and v2 differentials and the managed
+# invariant campaign, whose inline `coverage.` config runs fewer sequences. Coverage instruments every call: at their
+# Test-job size they take about 7 minutes each on a CI runner, beside V2Invariant's 22, and push the job past its 30.
+[profile.coverage]
+fuzz = { runs = 1024 }
+invariant = { runs = 256, depth = 32 }
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = true

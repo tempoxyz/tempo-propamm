@@ -1,0 +1,22 @@
+#!/bin/sh
+# Build the solar.lock revision once; never use a compiler from PATH or fall back to solc.
+set -eu
+project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+rev=$(tr -d '[:space:]' < "$project/solar.lock")
+case "$rev" in
+  *[!0-9a-f]*|'') echo "solar.lock must contain a full lowercase Git commit SHA" >&2; exit 1 ;;
+esac
+if [ "${#rev}" -ne 40 ]; then
+  echo "solar.lock must contain a full lowercase Git commit SHA" >&2
+  exit 1
+fi
+solar="$project/.solar/$rev/bin/solar"
+if [ -x "$solar" ]; then
+  exit 0
+fi
+# Solar requires Rust >=1.98; leave the SDK's Rust 1.97.1 pin unchanged.
+cd "$project"
+rustup toolchain install 1.99.1 --profile minimal
+cargo +1.99.1 install --locked --git https://github.com/paradigmxyz/solar --rev "$rev" \
+  --root "$project/.solar/$rev" solar-compiler
+test -x "$solar"

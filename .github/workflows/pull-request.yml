@@ -1,0 +1,21 @@
+name: Pull Request
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # SECURITY: pull_request executes contributor-controlled commits. Keep this workflow and every
+  # called job secretless. Live-network checks run from main.yml instead.
+  verify:
+    name: Verify
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/verify.yml # zizmor: ignore[self-repository] actionlint does not support $/ references yet.

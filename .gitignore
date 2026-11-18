@@ -1,0 +1,24 @@
+cache/
+out/
+broadcast/
+.env
+.env.*
+node_modules/
+target/
+# Seeded random vectors (contracts/test/vectors/fuzz.mjs) sit under contracts/test/vectors, where Forge may read.
+contracts/test/vectors/fuzz/
+# The TypeScript SDK's build output and its isolated Forge build (npm run contracts:build).
+sdk/ts/dist/
+sdk/ts/.forge/
+deployments/tempo-mainnet/*.json
+!deployments/tempo-mainnet/propamm-v2.json
+# DeployV2 dry runs record simulated addresses only.
+deployments/*/propamm-v2.dry-run.json
+
+# Never commit signing material.
+*.keystore
+*.password
+*.pem
+
+# Source-pinned local Solar compiler installs.
+.solar/

@@ -1,0 +1,18 @@
+#!/bin/sh
+# The source-pinned Solar compiler, presented to Forge as Solidity 0.8.30.
+set -eu
+project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+rev=$(tr -d '[:space:]' < "$project/solar.lock")
+case "$rev" in
+  *[!0-9a-f]*|'') echo "solar.lock must contain a full lowercase Git commit SHA" >&2; exit 1 ;;
+esac
+if [ "${#rev}" -ne 40 ]; then
+  echo "solar.lock must contain a full lowercase Git commit SHA" >&2
+  exit 1
+fi
+solar="$project/.solar/$rev/bin/solar"
+if [ ! -x "$solar" ]; then
+  echo "solar $rev is not installed; run bin/install-solar from the repository root" >&2
+  exit 127
+fi
+SOLC_WRAPPER=1 SOLC_WRAPPER_VERSION=0.8.30 exec "$solar" "$@"

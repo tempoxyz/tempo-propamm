@@ -1,0 +1,70 @@
+{
+  "name": "@tempoxyz/propamm-sdk",
+  "version": "0.1.1",
+  "description": "TypeScript maker SDK for propAMM v2: encoding, ladder math, reads, typed actions with signer roles and simulation",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tempoxyz/propAMM.git",
+    "directory": "sdk/ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "test": "node --test scripts/solidity-source.test.mjs && vitest run --project unit --project types",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "check:package": "npm run build && publint --strict && attw --pack --profile esm-only",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && node scripts/version.mjs",
+    "changeset:publish": "npm run build && node scripts/publish.mjs",
+    "contracts:build": "cd ../.. && FOUNDRY_OUT=sdk/ts/.forge/solar/out FOUNDRY_CACHE_PATH=sdk/ts/.forge/solar/cache forge build contracts/src/v2 contracts/src/interfaces/ITIP20.sol contracts/test/v2/mocks/MockVenueHook.sol",
+    "gen": "node scripts/gen.mjs",
+    "gen:check": "node scripts/gen.mjs --check",
+    "docs:decorator": "node scripts/decorator-docs.mjs --write",
+    "examples:check": "node scripts/check-examples.mjs",
+    "test:e2e": "vitest run --project e2e",
+    "test:vectors": "vitest run --project unit test/vectors.test.ts",
+    "test:e2e:vectors": "vitest run --project e2e test/e2e/vectors.test.ts"
+  },
+  "peerDependencies": {
+    "viem": "^2.56.9"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.5.15",
+    "@changesets/cli": "3.0.3",
+    "@solidity-parser/parser": "0.20.2",
+    "@types/node": "24.19.0",
+    "publint": "0.3.25",
+    "typescript": "6.0.3",
+    "viem": "2.56.9",
+    "vitest": "4.1.12"
+  },
+  "overrides": {
+    "launch-editor": "2.14.2",
+    "vite": "8.3.3"
+  }
+}

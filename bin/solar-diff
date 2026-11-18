@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Runs the propAMM v2 and ManagedDirectPropAMM suites on contracts and tests compiled by solar
+# (https://github.com/paradigmxyz/solar) instead of solc, as the Solar differential workflow (solar.yml) does.
+#
+# verify.yml holds every suite to passing under solc, so solc is the oracle: a test that fails under solar is a
+# divergence. The suites run with the ci profile, as there:
+#
+#   v2 and managed   contracts/test/v2/** (V2Invariant included), contracts/test/*Managed*, contracts/test/invariant/Managed*,
+#                    and the two files whose names miss "Managed" but hold managed suites (ManagedDirectPropAMMBufferHelperTest,
+#                    ManagedRebalanceControllerTest), with their v1 neighbours
+#   Tempo            everything verify.yml's tempo job runs (the managed, v2 access and MockFidelity suites under
+#                    --network tempo), without the fork gas suites, which pin solc's exact figures
+#   vectors          the seeded random ladder vectors through LadderMath, HotWord, ShapeWord and the venue
+#
+# contracts/test/solar/compare.mjs compares the first group with the committed .gas-snapshot (solc) and writes a
+# Markdown report to cache/solar/report.md. It also fails every test, fuzz test and invariant the selected files'
+# contracts declare or inherit that never ran under solar, so a suite or test solar drops can't pass silently.
+#
+# Usage: SOLAR=/path/to/solar bin/solar-diff [seed]
+#   SOLAR  the solar binary; default solar on PATH
+#   seed   the vectors' 64-bit seed; default the first 16 hex digits of HEAD, as CI uses the commit's
+# Builds go under cache/solar, never into the root out/ and cache/ the solc suites share. Needs Node and Foundry v1.8.1,
+# the version verify.yml pins: gas and cheatcode behaviour change between releases.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+seed=${1:-0x$(git rev-parse HEAD | cut -c1-16)}
+
+# Forge probes the compiler's --version, which solar answers like solc only as a wrapper; it must report the version
+# the sources pin.
+FOUNDRY_SOLC=$(command -v "${SOLAR:-solar}")
+SOLC_WRAPPER_VERSION=$(forge config --json | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).solc)')
+export FOUNDRY_SOLC SOLC_WRAPPER_VERSION SOLC_WRAPPER=1
+export FOUNDRY_PROFILE=ci FOUNDRY_OUT=cache/solar/out FOUNDRY_CACHE_PATH=cache/solar/cache
+mkdir -p cache/solar
+"$FOUNDRY_SOLC" --version
+
+status=0
+
+suites='{contracts/test/v2/**,contracts/test/*Managed*,contracts/test/invariant/Managed*,contracts/test/DirectPropAMMBufferHelper.t.sol,contracts/test/DirectPropAMMRebalanceController.t.sol}'
+# The files that selects, read from the source rather than solar's artifacts for compare.mjs's missing-test check.
+git ls-files 'contracts/test/v2/*.sol' 'contracts/test/*Managed*.sol' 'contracts/test/invariant/Managed*.sol' \
+  contracts/test/DirectPropAMMBufferHelper.t.sol contracts/test/DirectPropAMMRebalanceController.t.sol \
+  > cache/solar/selected-files.txt
+
+echo "== v2 and managed suites"
+# forge exits 1 when a test fails; compare.mjs reports which and sets the status.
+forge test --force --json --match-path "$suites" > cache/solar/tests.json || true
+node contracts/test/solar/compare.mjs cache/solar/tests.json .gas-snapshot cache/solar/selected-files.txt \
+  > cache/solar/report.md || status=1
+cat cache/solar/report.md
+
+echo "== Tempo precompiles"
+forge test -vvv --network tempo --match-path 'contracts/test/*Managed*' --no-match-path 'contracts/test/fork/*' || status=1
+forge test -vvv --network tempo --match-path 'contracts/test/*VenueAccess*' --no-match-path 'contracts/test/fork/*' || status=1
+forge test -vvv --network tempo --match-path 'contracts/test/v2/MockFidelity.t.sol' || status=1
+
+echo "== Seeded random vectors ($seed)"
+node contracts/test/vectors/fuzz.mjs --seed "$seed" --scale 2 --out contracts/test/vectors/fuzz/solar.json
+# Decoding a whole random set at once expands memory past the default gas limit.
+PROPAMM_VECTORS=contracts/test/vectors/fuzz/solar.json FOUNDRY_GAS_LIMIT=18446744073709551615 \
+  forge test -vvv --match-path 'contracts/test/v2/*Vectors.t.sol' || status=1
+
+exit "$status"

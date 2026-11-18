@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Holds the Solidity contracts, the Rust SDK and the TypeScript SDK to one seeded random set of the shared vectors, the
+# way CI does for every commit: contracts/test/vectors/fuzz.mjs writes it from the BigInt reference
+# (ladder-reference.mjs), then each implementation replays it with PROPAMM_VECTORS set:
+#
+#   Solidity    LadderMathVectors.t.sol and integration/VenueVectors.t.sol (LadderMath, HotWord, ShapeWord, Venue.post/quote/fill)
+#   Rust        sdk/rust/tests/vectors.rs (all of it, QuoteState::quote included)
+#   TypeScript  sdk/ts/test/vectors.test.ts (all of it, Quote.local included)
+#   Anvil       sdk/ts/test/e2e/vectors.test.ts (the deployed core: venue.quote, Settler swaps, post, post outcomes)
+#
+# Usage: bin/equivalence [seed] [scale]
+#   seed   a 64-bit seed; default the first 16 hex digits of HEAD, as CI uses the commit's
+#   scale  multiplies every section's case count; default 1
+# A failure names the case; rerun with the seed the first line prints. Needs Node 22.12 or later with sdk/ts installed
+# (npm ci --ignore-scripts; its Vitest runs the TypeScript replays), Foundry and Cargo. The Forge builds go under
+# cache/equivalence/solar and sdk/ts/.forge/solar, never into the root out/ and cache/ the full test suites share.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+seed=${1:-0x$(git rev-parse HEAD | cut -c1-16)}
+scale=${2:-1}
+file="contracts/test/vectors/fuzz/${seed}-x${scale}.json"
+
+node contracts/test/vectors/fuzz.mjs --seed "$seed" --scale "$scale" --out "$file"
+export PROPAMM_VECTORS="$file"
+
+echo "== Solidity"
+# Decoding a whole random set at once expands memory past the default gas limit, metering paused or not.
+FOUNDRY_OUT=cache/equivalence/solar/out FOUNDRY_CACHE_PATH=cache/equivalence/solar/cache FOUNDRY_GAS_LIMIT=18446744073709551615 \
+  forge test --match-path 'contracts/test/v2/*Vectors.t.sol'
+
+echo "== Rust"
+cargo test -p propamm-sdk --test vectors --locked
+
+echo "== TypeScript"
+(cd sdk/ts && npm run --silent test:vectors)
+
+echo "== Anvil"
+(cd sdk/ts && npm run --silent contracts:build && npm run --silent test:e2e:vectors)
+
+echo "seed $seed scale $scale: Solidity, Rust and TypeScript agree with the reference"
