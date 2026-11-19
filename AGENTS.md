@@ -576,7 +576,7 @@ One-time setup around the first release (step 1 needs a repository admin; steps 
    `npm ci --ignore-scripts && npm run changeset:publish`. Outside the workflow it verifies the published source
    commit and artifact, then names the tag it would ask for; it creates no GitHub metadata. Re-run that original
    failed Publish job: it rebuilds the same artifact, verifies npm's identity, and creates the missing tag and release.
-3. npm: give `@tempoxyz/propamm-sdk` a trusted publisher: GitHub Actions, `tempoxyz/propAMM`, workflow `main.yml`,
+3. npm: give `@tempoxyz/propamm-sdk` a trusted publisher: GitHub Actions, `tempoxyz/tempo-propamm`, workflow `main.yml`,
    environment `npm`, allowing `npm publish` (a configuration made since September 2026 allows only `npm stage publish`
    unless that is ticked, and `changeset publish` runs `npm publish`). Set the package to require two-factor
    authentication and disallow tokens. A configuration expires unless a publish uses it within 2 days, and step 2's

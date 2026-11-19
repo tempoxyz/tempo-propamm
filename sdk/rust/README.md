@@ -1,10 +1,10 @@
 # propAMM Rust SDK
 
 Market-maker client for **propAMM v2**, the maker-posted ladder venue. v2's contracts were audited by
-Sigma Prime ([audits](https://github.com/tempoxyz/propAMM/blob/main/audits/README.md); this SDK was
+Sigma Prime ([audits](https://github.com/tempoxyz/tempo-propamm/blob/main/audits/README.md); this SDK was
 not in scope). Its mainnet core is recorded in the contracts guide; supply your own verified venue,
 factory and chain. The SDK does not cover v1's oracle-priced pools. The
-[contracts guide](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md) explains
+[contracts guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md) explains
 the venue, its roles and how a quote works.
 
 `Exchange` submits actions, `Info` reads state, and `Actions` builds the same calls offline.
@@ -20,7 +20,7 @@ The crate is not on crates.io. Depend on a reviewed commit:
 
 ```toml
 [dependencies]
-propamm-sdk = { git = "https://github.com/tempoxyz/propAMM", rev = "<commit>" }
+propamm-sdk = { git = "https://github.com/tempoxyz/tempo-propamm", rev = "<commit>" }
 ```
 
 Inside a checkout of this repository, use a path dependency on `sdk/rust` instead:
@@ -195,7 +195,7 @@ belongs to the current owner**. A sponsor is a separate list operator registered
 under a nonzero id; only that sponsor's admin edits its per-pair lists. `approve_agent` grants the contract's updater
 role: posting, shape changes, the taker priority-fee cap and access restrictions, with no custody
 or authority to reopen access. The
-[contracts guide](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md) sets out
+[contracts guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md) sets out
 the full role model.
 
 Both `Exchange` and offline `Actions` expose these methods. TIP-1022 virtual addresses are
@@ -371,7 +371,7 @@ applies it to `QuoteRequest::priority_fee`. There is no setter method: pass
 `bindings::IVenue::setMaxTakerPriorityFeeCall` or `enableTakerPriorityFeeCapCall` to
 `Actions::prepare`. Reads sent as an `eth_call` without fee fields, such as `Info::quote` and
 `Info::taker_allowed`, never see the cap. The
-[contracts guide](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md) covers
+[contracts guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md) covers
 when to set one.
 
 ## Errors

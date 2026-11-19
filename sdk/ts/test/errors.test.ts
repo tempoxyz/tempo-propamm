@@ -361,7 +361,7 @@ describe('the errors the SDK throws', () => {
 
       venue: 0x1111111111111111111111111111111111111111
 
-      Docs: https://github.com/tempoxyz/propAMM/tree/main/sdk/ts#errors
+      Docs: https://github.com/tempoxyz/tempo-propamm/tree/main/sdk/ts#errors
       Details: execution reverted
       Version: @tempoxyz/propamm-sdk@<version>"
     `)

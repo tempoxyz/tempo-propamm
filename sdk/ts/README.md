@@ -4,25 +4,25 @@
 and the owners and sponsors who run their venues: encoding, a bit-exact copy of the ladder math, reads at one block,
 typed actions with the role each needs, simulation and gas, and revert decoding. Takers and routers can use its reads
 and local quotes. It builds no Settler swap or token approval: see the contracts guide's
-[Swapping](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md#swapping-taker-or-router).
+[Swapping](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md#swapping-taker-or-router).
 
 `ManagedDirectPropAMM`, v1's multi-pair oracle-priced pool, has optional pair hooks (callbacks for fee
 policy and swap notifications). They are a separate API; this v2 SDK's `VenueHookFlags` and
 `Actions.venue.setPairHook` do not configure them. Managed v1 has no built-in taker-fee table; see the
-[v1 hook guide](https://github.com/tempoxyz/propAMM/blob/main/contracts/README.md#pair-hooks-and-fees).
+[v1 hook guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/README.md#pair-hooks-and-fees).
 The v2 hook API and SDK behavior are unchanged.
 
 It is built on [viem](https://viem.sh) and follows `viem/tempo`'s action conventions. It reads no keys or environment
 variables and sends nothing on its own: viem accounts sign.
 
 > **Audited.** propAMM v2's contracts were audited by Sigma Prime
-> ([audits](https://github.com/tempoxyz/propAMM/blob/main/audits/README.md)); this SDK was not in scope.
+> ([audits](https://github.com/tempoxyz/tempo-propamm/blob/main/audits/README.md)); this SDK was not in scope.
 > The SDK ships no deployment addresses: supply a factory you verified,
 > and check every venue against it with `Info.isVenue` before you trust it.
 
 The old curated Registry SDK APIs have been removed. The new permissionless `Registry` has a different ABI,
 is not deployed, and has no replacement SDK actions. See the
-[registry guide](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md#optional-venue-registry-not-deployed).
+[registry guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md#optional-venue-registry-not-deployed).
 
 ## Install
 
@@ -416,7 +416,7 @@ if (listed.status === 'success' && capped.status === 'success') console.log(list
 ```
 
 - **Access rules** (pair modes, the home list, sponsor lists, the deny list) are the contracts':
-  see the contracts guide's [Access](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md#access).
+  see the contracts guide's [Access](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md#access).
 - **Batch limits.** `setMembers` and `setDenied` take 1 to `Venue.maxBatch` (100) accounts, and the SDK never splits
   them: split a longer list yourself. Each new account is a fresh storage slot, about 255k gas: 50 new accounts take
   12.8M gas and 100 take 25.6M. At `Plan.gasLimit`'s 130%, a batch of about 90 new accounts still fits Tempo's 30M
@@ -637,7 +637,7 @@ Names follow the Rust SDK's, in TypeScript casing (`Info::venue_state` is `Info.
 
 ## Links
 
-- [propAMM v2 contracts guide](https://github.com/tempoxyz/propAMM/blob/main/contracts/src/v2/README.md): roles,
+- [propAMM v2 contracts guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md): roles,
   access, quoting and swapping.
-- [propAMM v2 specification](https://github.com/tempoxyz/propAMM/blob/main/spec/propamm-v2.md).
-- [Rust SDK](https://github.com/tempoxyz/propAMM/blob/main/sdk/rust/README.md).
+- [propAMM v2 specification](https://github.com/tempoxyz/tempo-propamm/blob/main/spec/propamm-v2.md).
+- [Rust SDK](https://github.com/tempoxyz/tempo-propamm/blob/main/sdk/rust/README.md).

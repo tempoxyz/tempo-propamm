@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tempoxyz/propAMM.git",
+    "url": "git+https://github.com/tempoxyz/tempo-propamm.git",
     "directory": "sdk/ts"
   },
   "publishConfig": {
