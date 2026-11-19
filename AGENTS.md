@@ -607,8 +607,11 @@ When upgrading Foundry, review formatting and gas changes together and update ev
 floating `stable` release. The gas snapshot runs with `isolate = true`, so it is not comparable to a mainnet
 transaction fee estimate.
 
-The only GitHub STS policy in `.github/sts/` is `changesets`, the SDK release's own (above). This repository is
-public, so other workflows read it without credentials.
+Besides `changesets` (the SDK release's own, above), `.github/sts/` holds two read-only policies for consumers that
+fetch this repository while it is private: `earn-ci-read` (tempoxyz/contracts' verify workflow, which rebuilds its
+DirectPropAMM fixture) and `policy-engine-ci-read` (tempoxyz/policy-engine's lint, test and image workflows, which
+fetch `propamm-sdk`). Each is pinned to one repository's ID and named workflows. Remove both once the repository is
+public and those consumers have dropped their token steps.
 
 ## Repository layout
 
