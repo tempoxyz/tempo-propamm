@@ -23,8 +23,16 @@ summarizes the review. Routers, hook implementations and vault peripherals were 
 ## Not covered
 
 Each report covers its listed components at the commit it reviewed; later changes are not covered by
-it. Neither report covers `DirectPropAMM`, the buffer helper, the rebalance controller, the oracle
+it. Neither of these two reports covers `DirectPropAMM` or the buffer helper (see below), the rebalance controller, the oracle
 adapters, `Registry`, or the Rust and TypeScript SDKs.
+
+## DirectPropAMM
+
+Sigma Prime reviewed the `DirectPropAMM` pool contract and `DirectPropAMMBufferHelper` as part of its PropAMM & Earn review (v2.0,
+August 2026), which is listed with Earn's audits in
+[tempoxyz/contracts](https://github.com/tempoxyz/contracts/blob/main/docs/earn/audit/README.md) and
+shared the same way. Changes after that review are not covered. That review did not cover the oracle
+adapters or the rebalance controller used with a DirectPropAMM pool.
 
 ## Verifying a copy
 

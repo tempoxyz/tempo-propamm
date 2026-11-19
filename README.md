@@ -6,8 +6,8 @@ trade.
 
 > **Status:** v2 was audited by Sigma Prime ([audits](audits/README.md)) and its core is deployed on Tempo mainnet (see the
 > [v2 guide](contracts/src/v2/README.md#deployments)). The managed pool core (`contracts/src/managed`) was audited by
-> Sigma Prime and needs new immutable deployments before use. `DirectPropAMM` and the other v1 contracts are unaudited,
-> with no supported deployment.
+> Sigma Prime and needs new immutable deployments before use. `DirectPropAMM` and its buffer helper were reviewed by Sigma Prime with
+> Earn; the other v1 contracts are unaudited, and there is no supported v1 deployment.
 > `Registry` is a separate, unaudited discovery sidecar and is not deployed.
 
 ## Choose a contract
@@ -65,7 +65,9 @@ and their four interfaces in `contracts/src/managed`. It found no vulnerabilitie
 summarizes the review. Routers, hook implementations and vault peripherals were out of scope. The report is v1.0,
 November 2026.
 
-`DirectPropAMM`, the buffer helper, the rebalance controller, the oracle adapters and `Registry` have not been
+Sigma Prime also reviewed the `DirectPropAMM` pool contract and its buffer helper in its PropAMM & Earn review (v2.0, August 2026), listed
+with Earn's audits in [tempoxyz/contracts](https://github.com/tempoxyz/contracts/blob/main/docs/earn/audit/README.md);
+later changes are not covered by it. The rebalance controller, the oracle adapters and `Registry` have not been
 audited. The reports are confidential and shared under NDA through [security@tempo.xyz](mailto:security@tempo.xyz); the
 [audits page](audits/README.md) gives their scope and SHA-256 digests.
 
