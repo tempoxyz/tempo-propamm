@@ -6,8 +6,8 @@ in an issue or pull request.
 ## Set up
 
 ```bash
-git clone https://github.com/tempoxyz/propAMM
-cd propAMM
+git clone https://github.com/tempoxyz/tempo-propamm
+cd tempo-propamm
 git submodule update --init lib/forge-std lib/openzeppelin-contracts
 bin/install-solar   # the source-pinned Solar compiler
 ```

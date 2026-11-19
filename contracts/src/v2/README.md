@@ -440,7 +440,7 @@ informational): see the [audits page](../../../audits/README.md).
 These tables measure fresh local builds with Foundry v1.8.1 and Solar `d83529b` (the revision in `solar.lock`),
 not the deployed solc-built mainnet core. The compiler migration does not upgrade immutable contracts or their clones;
 these savings require a new Solar-built deployment. Estimate gas against the actual target deployment before sending.
-The [pre-migration tables](https://github.com/tempoxyz/propAMM/blob/f1adbc7d9e20684202f507a81c14f5a69a71ab2e/contracts/src/v2/README.md#gas)
+The pre-migration tables
 record the earlier solc test measurements, not live transaction estimates.
 
 ### On Tempo

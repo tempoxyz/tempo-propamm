@@ -1,9 +1,9 @@
 # Allow the release workflow (push to main) to mint a short-lived token that opens and updates the TypeScript SDK's
 # "chore(sdk-ts): version packages" pull request through changesets/action, and pushes its version branch. Replaces the
 # built-in GITHUB_TOKEN, so the org can keep "Allow GitHub Actions to create and approve pull requests" off.
-subject: repo:tempoxyz@211589300/propAMM@1463200996:ref:refs/heads/main
+subject: repo:tempoxyz@211589300/tempo-propamm@1463200996:ref:refs/heads/main
 claim_pattern:
-  job_workflow_ref: tempoxyz/propAMM/\.github/workflows/main\.yml@refs/heads/main
+  job_workflow_ref: tempoxyz/tempo-propamm/\.github/workflows/main\.yml@refs/heads/main
 permissions:
   contents: write
   pull_requests: write

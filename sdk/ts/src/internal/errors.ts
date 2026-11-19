@@ -6,7 +6,7 @@ import { BaseError as ViemBaseError } from 'viem'
 import { version } from '../version.js'
 
 /** Where `docsPath` points: this package's README, so a path is an anchor such as `#errors`. */
-const docsBaseUrl = 'https://github.com/tempoxyz/propAMM/tree/main/sdk/ts'
+const docsBaseUrl = 'https://github.com/tempoxyz/tempo-propamm/tree/main/sdk/ts'
 
 /**
  * Any error a function can throw beyond the ones it names: ox's `GlobalErrorType`. Each function's `ErrorType` (such

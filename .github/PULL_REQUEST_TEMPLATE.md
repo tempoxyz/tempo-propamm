@@ -9,4 +9,4 @@
 - [ ] The checks in `verify.yml` for the areas I changed pass locally.
 - [ ] The owning guide is updated for any behavior change.
 
-Report security vulnerabilities privately ([SECURITY.md](https://github.com/tempoxyz/propAMM/blob/main/SECURITY.md)), not in a pull request.
+Report security vulnerabilities privately ([SECURITY.md](https://github.com/tempoxyz/tempo-propamm/blob/main/SECURITY.md)), not in a pull request.
