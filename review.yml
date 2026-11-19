@@ -1,0 +1,4 @@
+# Voight-Kampff: every pull request needs a human-confirmed approval from a code owner.
+required-approvals: 1
+require-codeowners: true
+allow-self-reviews: false
