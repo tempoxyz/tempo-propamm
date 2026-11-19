@@ -1,5 +1,5 @@
 ---
-"@tempoxyz/propamm-sdk": major
+"@tempoxyz/propamm-sdk": minor
 ---
 
 Removed the retired curated Registry ABI, constants, actions, listing read, signer roles and event/error decoding.
