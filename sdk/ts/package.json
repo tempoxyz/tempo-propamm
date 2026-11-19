@@ -1,6 +1,6 @@
 {
   "name": "@tempoxyz/propamm-sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "TypeScript maker SDK for propAMM v2: encoding, ladder math, reads, typed actions with signer roles and simulation",
   "license": "MIT",
   "repository": {
