@@ -404,6 +404,9 @@ choice for the life of the pair, not of the adapter; a pair that needs the other
 precision only, never a currency conversion: the reviewed description is what says the feed prices the pair's base in
 its quote, and the cautions in [Replace an 8-decimal pool's feed](#replace-an-8-decimal-pools-feed) apply unchanged.
 
+The feed is read with raw calls bounded in gas and answer size, so a source whose `description()` or `decimals()`
+call succeeds with bytes that do not decode is refused by field and index, as one that reverts is.
+
 The preflight deploys a local probe of every adapter, outside the broadcast, and stops unless its source answers the
 reviewed description and decimals and holds a positive observation no older than the pair's planned age. For a pair
 that replaces a live pool, set its `ORACLE_REFERENCES` entry to that pool's current `oracle()`: the new adapter must
@@ -749,6 +752,8 @@ accrued in the pool it leaves does not move.
 
 The run warns, without stopping, about what a helper may be deployed ahead of:
 
+- a paused pool. A pool deploys paused, and the pause is its own gate: no pair's access check reads it, so a listed
+  vault reads `Allowed` while every swap reverts `Paused` until the owner calls `unpause`;
 - a vault the pair does not admit yet: its swaps revert until it is listed and the pair leaves `Closed`;
 - a named list that would refuse the vault on a `Listed` pair. An `Open` pair admits any caller and a `Closed` pair
   refuses every one without reading a list, so the pool's own answer hides an unregistered, disabled or unadmitted

@@ -52,7 +52,7 @@ interface ITellerBindings {
 /// The run stops on a pool that doesn't answer as a managed pool, an unknown or removed pair, tokens or an oracle
 /// other than the expected ones, a pair another live pair can be mistaken for, a Teller that serves another vault, or
 /// two helpers for one vault and pair. It warns, without stopping, about what the helper can be deployed ahead of: a
-/// vault the pair doesn't admit yet, a named list that would refuse the vault on a `Listed` pair (an `Open` or
+/// paused pool, a vault the pair doesn't admit yet, a named list that would refuse the vault on a `Listed` pair (an `Open` or
 /// `Closed` pair reads no list, so the pool's own answer hides an unregistered, disabled or unadmitted sponsor and a
 /// vault that isn't listed), and a pair hook, whose fee for the vault must be verified zero in both directions before
 /// the Teller switches (`docs/veda-integration.md`). Forge sends only with `--broadcast`.
@@ -196,6 +196,10 @@ contract DeployManagedBufferHelpers is Script {
         uint16 pairs = _checkPool(config.pool);
         count = config.helpers.length;
         if (count == 0 || count > MAX_HELPERS) revert InvalidConfig("HELPER_* lists need 1 to 16 helpers");
+        // The pool-wide pause is its own gate: no pair's access check reads it. A pool deploys paused.
+        if (config.pool.paused()) {
+            _warnings.push("The pool is paused: every swap reverts until its owner unpauses it");
+        }
         // A check of operator input before anything runs: any bad entry stops the whole run.
         for (uint256 i; i < count; ++i) {
             HelperConfig memory h = config.helpers[i];
@@ -492,7 +496,7 @@ contract DeployManagedBufferHelpers is Script {
             console2.log(string.concat("WARNING: ", _warnings[i]));
         }
         console2.log("No vault, Teller or pool state changed: a helper has no authority.");
-        console2.log("Next: the pool's owner admits each BoringVault on its pair (ManagedPoolAccess), then the Veda");
-        console2.log("authority allows each helper and selects it for the Teller's deposit and withdrawal hooks.");
+        console2.log("Next: the pool's owner admits each BoringVault on its pair (ManagedPoolAccess) and unpauses the");
+        console2.log("pool, then the Veda authority allows each helper and selects it for the Teller's hooks.");
     }
 }

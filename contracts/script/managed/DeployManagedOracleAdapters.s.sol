@@ -85,6 +85,9 @@ contract DeployManagedOracleAdapters is Script {
     uint256 public constant MAX_ADAPTERS = 16;
     /// @notice `DeployManagedPool`'s limit on a pair's oracle age.
     uint256 public constant MAX_MAX_ORACLE_AGE = 365 days;
+    /// @dev The gas and answer size a raw read of a source allows.
+    uint256 internal constant PROBE_GAS = 1_000_000;
+    uint256 internal constant PROBE_MAX_ANSWER = 4096;
     /// @dev The descriptions file's line for a source without a description.
     string internal constant NO_DESCRIPTION = "-";
 
@@ -264,22 +267,28 @@ contract DeployManagedOracleAdapters is Script {
             revert InvalidConfig(_field("ORACLE_SOURCE_DESCRIPTIONS_FILE", i));
         }
         // The feed is operator input, so a missing or odd answer is refused by name, not with whatever it returned.
-        IAggregatorV3 feed = IAggregatorV3(a.source);
-        try feed.description() returns (string memory actual) {
-            if (keccak256(bytes(actual)) != keccak256(bytes(a.description))) {
-                revert InvalidConfig(string.concat(
-                        _field("ORACLE_SOURCE_DESCRIPTIONS_FILE", i), ": the feed says \"", actual, "\""
-                    ));
-            }
-        } catch {
-            revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " has no description()"));
+        // Raw, bounded calls: a typed call reverts without a name when an answer that succeeded does not decode.
+        (bool ok, bytes memory answer) = _probe(a.source, abi.encodeCall(IAggregatorV3.description, ()));
+        if (!ok) revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " has no description()"));
+        (bool wellFormed, string memory actual) = _decodeString(answer);
+        if (!wellFormed) {
+            revert InvalidConfig(string.concat(
+                    _field("ORACLE_SOURCES", i), " answers description() with malformed data"
+                ));
         }
-        uint8 feedDecimals;
-        try feed.decimals() returns (uint8 actual) {
-            feedDecimals = actual;
-        } catch {
-            revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " has no decimals()"));
+        if (keccak256(bytes(actual)) != keccak256(bytes(a.description))) {
+            revert InvalidConfig(string.concat(
+                    _field("ORACLE_SOURCE_DESCRIPTIONS_FILE", i), ": the feed says \"", actual, "\""
+                ));
         }
+        (ok, answer) = _probe(a.source, abi.encodeCall(IAggregatorV3.decimals, ()));
+        if (!ok) revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " has no decimals()"));
+        if (answer.length != 32 || abi.decode(answer, (uint256)) > type(uint8).max) {
+            revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " answers decimals() with malformed data"));
+        }
+        // Checked above.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint8 feedDecimals = uint8(abi.decode(answer, (uint256)));
         if (a.kind == Kind.Chainlink18To8) {
             if (feedDecimals != 18) {
                 revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " is not an 18-decimal feed"));
@@ -334,6 +343,41 @@ contract DeployManagedOracleAdapters is Script {
             revert ReferenceMismatch(a.baseline, price, updatedAt, referencePrice, referenceUpdatedAt);
         }
         // forge-lint: disable-end(calls-loop, require-revert-in-loop)
+    }
+
+    /// @dev A raw read with bounded gas and answer size, so a target that burns its gas or answers with a huge payload
+    /// reads as no answer. `ok` is false on a revert and on an answer above `PROBE_MAX_ANSWER` bytes.
+    function _probe(address target, bytes memory data) internal view returns (bool ok, bytes memory answer) {
+        uint256 gasLimit = PROBE_GAS;
+        uint256 maxSize = PROBE_MAX_ANSWER;
+        assembly ("memory-safe") {
+            ok := staticcall(gasLimit, target, add(data, 32), mload(data), 0, 0)
+            let size := returndatasize()
+            if gt(size, maxSize) { ok := 0 }
+            if iszero(ok) { size := 0 }
+            answer := mload(0x40)
+            mstore(answer, size)
+            returndatacopy(add(answer, 32), 0, size)
+            mstore(0x40, add(add(answer, 32), and(add(size, 31), not(31))))
+        }
+    }
+
+    /// @dev One ABI-encoded string in its canonical layout: the offset word 32, a length word, and the bytes inside
+    /// the answer. Anything else is not decoded.
+    function _decodeString(bytes memory answer) internal pure returns (bool wellFormed, string memory value) {
+        if (answer.length < 64) return (false, "");
+        uint256 offset;
+        uint256 length;
+        assembly ("memory-safe") {
+            offset := mload(add(answer, 32))
+            length := mload(add(answer, 64))
+        }
+        if (offset != 32 || length > answer.length - 64) return (false, "");
+        bytes memory out = new bytes(length);
+        for (uint256 i; i < length; ++i) {
+            out[i] = answer[64 + i];
+        }
+        return (true, string(out));
     }
 
     function _deploy(AdapterConfig memory a) internal returns (IPriceOracle) {

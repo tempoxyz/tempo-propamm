@@ -435,6 +435,8 @@ contract DeployManagedBufferHelpersRun is DeployManagedBufferHelpers, ManagedScr
         pool.addPair(prime, TempoMainnet.PATH_USD, IPriceOracle(oracle), 1 days, 50);
         pool.setMembers(0, 0, vaults, true);
         pool.setPairAccess(0, IManagedDirectPropAMM.AccessMode.Listed);
+        // A pool deploys paused, which the helper script warns about.
+        pool.unpause();
         vm.stopPrank();
         _pool = IManagedDirectPropAMM(address(pool));
         _helpers.push(

@@ -108,6 +108,8 @@ contract DeployManagedBufferHelpersTest is Test {
         pool.setMembers(PRIME_PAIR, PARTNER, _one(vaultB), true);
         pool.setPairAccess(0, IManagedDirectPropAMM.AccessMode.Listed);
         pool.setPairAccess(PRIME_PAIR, IManagedDirectPropAMM.AccessMode.Listed);
+        // A pool deploys paused.
+        pool.unpause();
     }
 
     function test_deploysOneManagedHelperPerVaultAndPair() external {
@@ -444,6 +446,28 @@ contract DeployManagedBufferHelpersTest is Test {
             script.run();
         }
         assertEq(vm.getNonce(deployer), 0);
+    }
+
+    /// @dev No pair's access check reads the pool-wide pause, so a listed vault on a paused pool reads `Allowed`
+    /// while every swap reverts. The run says so, once, ahead of the per-helper warnings.
+    function test_warnsAboutAPausedPool() external {
+        pool.pause();
+        assertTrue(pool.takerAllowed(PRIME_PAIR, vaultA, 0));
+        DeployManagedBufferHelpers.Config memory c = _config(2);
+        c.helpers[0] = _helper(vaultA, PRIME_PAIR, address(prime), 0, ID_A, 50);
+        c.helpers[1] = _helper(vaultB, 0, address(usdy), 0, ID_B, 50);
+        script.setInput(c);
+        assertEq(script.run().length, 2);
+        string[] memory warnings = script.warnings();
+        assertEq(warnings.length, 2);
+        assertEq(warnings[0], "The pool is paused: every swap reverts until its owner unpauses it");
+        assertEq(warnings[1], "Helper 1: the pair does not admit the vault now (vault not listed): its swaps revert");
+
+        pool.unpause();
+        c = _config(1);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        assertEq(script.warnings().length, 0);
     }
 
     /// @dev An Open pair admits any caller without reading a list, so the pool's answer hides a list that would

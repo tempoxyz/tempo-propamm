@@ -8,6 +8,7 @@ import { Chainlink18To8PriceOracleAdapter } from "../../src/Chainlink18To8PriceO
 import { ChainlinkPriceOracleAdapter } from "../../src/ChainlinkPriceOracleAdapter.sol";
 import { OndoUSDYPriceOracleAdapter } from "../../src/OndoUSDYPriceOracleAdapter.sol";
 import { TempoMainnet } from "../../src/TempoMainnet.sol";
+import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IPriceOracle } from "../../src/interfaces/IPriceOracle.sol";
 import { MockOracle } from "../mocks/MockOracle.sol";
 import { VirtualAddress } from "../v2/utils/VirtualAddress.sol";
@@ -47,6 +48,24 @@ contract DeployManagedOracleAdaptersHarness is DeployManagedOracleAdapters {
 
     function _readConfig() internal view override returns (Config memory) {
         return abi.decode(_encoded, (Config));
+    }
+}
+
+/// @dev A source whose `description()` and `decimals()` calls succeed with whatever bytes the test sets.
+contract RawAnswerFeed {
+    bytes public descriptionAnswer;
+    bytes public decimalsAnswer;
+
+    function set(bytes calldata description_, bytes calldata decimals_) external {
+        descriptionAnswer = description_;
+        decimalsAnswer = decimals_;
+    }
+
+    fallback() external {
+        bytes memory out = msg.sig == IAggregatorV3.description.selector ? descriptionAnswer : decimalsAnswer;
+        assembly ("memory-safe") {
+            return(add(out, 32), mload(out))
+        }
     }
 }
 
@@ -277,6 +296,51 @@ contract DeployManagedOracleAdaptersTest is Test {
         _expectInvalid("ORACLE_KINDS[0]");
         script.run();
         assertEq(vm.getNonce(deployer), 0);
+    }
+
+    /// @dev A call that succeeds with bytes that do not decode is refused by field and index, as a revert is.
+    function test_refusesMalformedFeedAnswersByName() external {
+        RawAnswerFeed raw = new RawAnswerFeed();
+        DeployManagedOracleAdapters.Config memory c = _config(2);
+        c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(feed8), "EUR / USD", 8);
+        c.adapters[1] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(raw), "EUR / USD", 8);
+        script.setInput(c);
+        bytes memory goodDescription = abi.encode("EUR / USD");
+        bytes memory goodDecimals = abi.encode(uint256(8));
+
+        // No bytes at all, a bare word, an offset outside the data, and a length past its end.
+        bytes[4] memory badDescriptions = [
+            bytes(""),
+            abi.encode(uint256(32)),
+            abi.encode(uint256(64), uint256(9), bytes32("EUR / USD")),
+            abi.encode(uint256(32), uint256(33), bytes32("EUR / USD"))
+        ];
+        for (uint256 i; i < badDescriptions.length; ++i) {
+            raw.set(badDescriptions[i], goodDecimals);
+            _expectInvalid("ORACLE_SOURCES[1] answers description() with malformed data");
+            script.run();
+        }
+        // A payload above the answer bound reads as no answer at all, and is never copied.
+        raw.set(abi.encode(new bytes(8192)), goodDecimals);
+        _expectInvalid("ORACLE_SOURCES[1] has no description()");
+        script.run();
+
+        // A word above 255, a short word and a long one.
+        bytes[3] memory badDecimals = [abi.encode(uint256(256)), bytes(hex"08"), abi.encode(uint256(8), uint256(0))];
+        for (uint256 i; i < badDecimals.length; ++i) {
+            raw.set(goodDescription, badDecimals[i]);
+            _expectInvalid("ORACLE_SOURCES[1] answers decimals() with malformed data");
+            script.run();
+        }
+
+        // Well-formed answers pass these checks and reach the next one: this source has no latest round.
+        raw.set(goodDescription, goodDecimals);
+        vm.expectRevert();
+        script.run();
+        raw.set(abi.encode("EUR / GBP"), goodDecimals);
+        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS_FILE[1]: the feed says \"EUR / GBP\"");
+        script.run();
+        assertEq(vm.getNonce(deployer), 0, "a refused run sends nothing");
     }
 
     function test_usdyTakesOnlyOndosWrapperOnMainnet() external {

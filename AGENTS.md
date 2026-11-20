@@ -659,6 +659,6 @@ lib/               public Foundry dependencies (submodules)
   `deployments/`, never from the sourced env file, and its `verify` holds the mined adapters to the same inputs
   after inclusion, since an adapter reads its feed again when it is mined. The second refuses a pool that is not
   managed, a pair whose live tokens and oracle are not the expected ones or that another live pair matches, and a
-  Teller that serves another vault; it only warns about a vault not yet admitted, a named list that would refuse the
-  vault on a `Listed` pair, or a pair hook. Only `DeployManagedPool` refuses an oracle a second pair names: the
+  Teller that serves another vault; it only warns about a paused pool, a vault not yet admitted, a named list that
+  would refuse the vault on a `Listed` pair, or a pair hook. Only `DeployManagedPool` refuses an oracle a second pair names: the
   pool's `addPair` and `setOracle` accept one another pair already reads.
