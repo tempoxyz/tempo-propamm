@@ -23,22 +23,21 @@ contract DeployManagedCoreTest is Test {
         vm.chainId(1);
         DeployManagedCore script = new DeployManagedCore();
         vm.expectRevert("Unsupported chain");
-        script.deploy(DEPLOYER, false, false);
+        script.deploy(DEPLOYER, false);
     }
 
-    /// @dev Pre-audit contracts: a mainnet broadcast needs the explicit acknowledgement; a mainnet simulation doesn't.
-    function test_mainnetBroadcastNeedsPreAuditAck() external {
+    function test_mainnetSimulateAndBroadcast() external {
         vm.chainId(4217);
         DeployManagedCore script = new DeployManagedCore();
-        vm.expectRevert("Mainnet broadcast needs MANAGED_MAINNET_PRE_AUDIT_ACK=true");
-        script.deploy(DEPLOYER, true, false);
-        PoolFactory factory = script.deploy(DEPLOYER, false, false);
-        assertEq(Settler(factory.defaultSettler()).implementation(), factory.implementation());
+        PoolFactory simulated = script.deploy(DEPLOYER, false);
+        assertEq(Settler(simulated.defaultSettler()).implementation(), simulated.implementation());
+        PoolFactory factory = script.deploy(DEPLOYER, true);
+        assertEq(Settler(factory.defaultSettler()).factory(), address(factory));
     }
 
-    function test_moderatoBroadcastNeedsNoAck() external {
+    function test_moderatoBroadcast() external {
         vm.chainId(42431);
-        PoolFactory factory = (new DeployManagedCore()).deploy(DEPLOYER, true, false);
+        PoolFactory factory = (new DeployManagedCore()).deploy(DEPLOYER, true);
         assertEq(Settler(factory.defaultSettler()).factory(), address(factory));
     }
 }
