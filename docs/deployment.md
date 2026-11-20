@@ -9,6 +9,8 @@ Operational procedures for the v1 pools; what each contract does is in the [v1 g
 | A USDY/pathUSD pool | `DeployUsdyPool.s.sol` | [USDY pool variant](#usdy-pool-variant) |
 | A par pool behind a `DirectPropAMMRebalanceController` | `DeployParPool.s.sol` | [Par pool with a rebalance controller](#par-pool-with-a-rebalance-controller) |
 | A `ManagedDirectPropAMM` (many pairs over one inventory, with sponsor access) | `DeployManagedPool.s.sol`, `ManagedPoolAccess.s.sol` | [Managed pools](#managed-pools) |
+| The price adapters a managed pool's pairs read | `DeployManagedOracleAdapters.s.sol` | [Deploy the pairs' price adapters](#deploy-the-pairs-price-adapters) |
+| The Veda buffer helpers that connect BoringVaults to a managed pool | `DeployManagedBufferHelpers.s.sol` | [Deploy the vaults' buffer helpers](#deploy-the-vaults-buffer-helpers) |
 
 Every `DirectPropAMM` then goes live through [Bring a pool live](#bring-a-pool-live).
 
@@ -410,6 +412,38 @@ A maker's pool is a clone: `PoolFactory.createPool(owner, salt)` creates it paus
 `predictPool(creator, owner, salt)` returns. `DeployManagedPool.s.sol` below instead deploys a standalone pool
 with no factory, which the shared Settler does not accept.
 
+### Deploy the pairs' price adapters
+
+Each managed pair reads one `IPriceOracle`. `contracts/script/managed/DeployManagedOracleAdapters.s.sol` deploys the
+adapters before `addPair`, on Tempo mainnet (4217) or Moderato (42431). They are immutable and ownerless. One
+comma-separated entry per adapter:
+
+| Variable | Notes |
+| --- | --- |
+| `ORACLE_KINDS` | `CHAINLINK` (the feed's own decimals), `CHAINLINK_18_TO_8` (an 18-decimal feed read at 8, rounded down) or `ONDO_USDY` (Ondo's wrapper, 18 decimals) |
+| `ORACLE_SOURCES` | The AggregatorV3 feed, or Ondo's wrapper |
+
+A managed pair fixes its oracle's decimals when it is added, so the kind is a choice for the life of the pair.
+Decimals are precision, never a currency conversion: confirm with the feed's operator that the feed prices the pair's
+base in its quote, as in [Replace an 8-decimal pool's feed](#replace-an-8-decimal-pools-feed).
+
+Copy `contracts/script/managed/config/managed-oracle-adapters.env.example` to an ignored
+`.env.managed-oracle-adapters` and fill it. Then:
+
+```bash
+set -a
+source .env.managed-oracle-adapters
+set +a
+
+forge script contracts/script/managed/DeployManagedOracleAdapters.s.sol:DeployManagedOracleAdapters \
+  --rpc-url "$TEMPO_RPC_URL" --network tempo \
+  --sender "$DEPLOYER_ADDRESS" --tempo.fee-token PathUSD -vvvv
+```
+
+The run logs each adapter's decimals, price and observation time, and the `PAIR_ORACLES` line for
+`DeployManagedPool`. Review them, then an authorized operator adds the deployer's keystore and password-file flags
+and `--broadcast`. For a pair that replaces a live pool, compare each price with that pool's `oracle()`.
+
 ### Deploy a managed pool
 
 `contracts/script/managed/DeployManagedPool.s.sol` deploys `ManagedDirectPropAMM(OWNER_ADDRESS, address(0))` on Tempo
@@ -671,6 +705,42 @@ POOL_ADDRESS=0x... MODE=... forge script contracts/script/managed/ManagedPoolAcc
    restores its retained current-generation listings on every admitted pair, subject to the other access gates;
    review it even when no new `MemberUpdated` event appears. Review settler changes as custody
    and identity-authority changes, not merely routing updates.
+
+### Deploy the vaults' buffer helpers
+
+A Veda BoringVault trades on a managed pair through one `DirectPropAMMBufferHelper` bound to the pool, the vault, the
+pair, the list that admits the vault and its route. `contracts/script/managed/DeployManagedBufferHelpers.s.sol`
+deploys one helper per entry, on chain 4217 or 42431, after the pairs exist. A helper holds no tokens and has no
+authority: the pool's owner still admits each BoringVault ([Managed pool access](#managed-pool-access)), and the Veda
+authority still allows the helper and selects it on the Teller. `POOL_ADDRESS` is the managed pool; one
+comma-separated entry per helper:
+
+| Variable | Notes |
+| --- | --- |
+| `HELPER_VAULTS` | The BoringVault itself, the account that swaps: never a Teller or a wallet |
+| `HELPER_PAIR_INDEXES` | The pair whose base the vault holds and whose quote is its asset |
+| `HELPER_SPONSOR_IDS` | The list that admits the vault on the pair, 0 for its home list |
+| `HELPER_CUSTOMER_IDS` | The nonzero 32-byte route id the vault's rounding credit accrues under |
+| `HELPER_SLIPPAGE_BPS` | The helper's quote tolerance, at most 1,000. Not a fee cap |
+
+Copy `contracts/script/managed/config/managed-buffer-helpers.env.example` to an ignored
+`.env.managed-buffer-helpers` and fill it. Then:
+
+```bash
+set -a
+source .env.managed-buffer-helpers
+set +a
+
+forge script contracts/script/managed/DeployManagedBufferHelpers.s.sol:DeployManagedBufferHelpers \
+  --rpc-url "$TEMPO_RPC_URL" --network tempo \
+  --sender "$DEPLOYER_ADDRESS" --tempo.fee-token PathUSD -vvvv
+```
+
+The run logs each helper's vault, pair index and tokens: compare them with the pair you meant, since mined `addPair`
+order assigns indexes. Then an authorized operator adds the deployer's keystore and password-file flags and
+`--broadcast`. Before the Teller switches, follow
+[the Veda integration guide](veda-integration.md#on-a-manageddirectpropamm): the vault must be admitted on the pair,
+and a pair hook must charge it zero in both directions.
 
 ### Auditing and replacing the managed settler
 

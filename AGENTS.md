@@ -427,7 +427,8 @@ The managed suites hold the pool to its two references and its own invariants:
   partitions, never an underlying user's direct-trading credits.
 
 The `ManagedDirectPropAMM` suites and its scripts' suites (`contracts/test/managed/DeployManagedPool.t.sol`,
-`contracts/test/managed/ManagedPoolAccess.t.sol`) run on mocks, whose tokens forward a transfer to a virtual address registered
+`contracts/test/managed/ManagedPoolAccess.t.sol`, `contracts/test/managed/DeployManagedOracleAdapters.t.sol`,
+`contracts/test/managed/DeployManagedBufferHelpers.t.sol`) run on mocks, whose tokens forward a transfer to a virtual address registered
 in `MockVirtualAddressRegistry` to its master, as Tempo's TIP-20 does, and CI also runs them under `--network tempo`.
 There the deploy script's suite probes pathUSD itself, and `contracts/test/managed/ManagedDirectPropAMMTempo.t.sol` and
 `contracts/test/managed/ManagedDirectPropAMMRegression.t.sol` use the TIP-1022 address registry itself and TIP-20 factory
@@ -638,3 +639,6 @@ lib/               public Foundry dependencies (submodules)
   pool's deployment block, replays every access event against the chain, describing admin contracts with raw probes,
   bounded in gas and answer size, so an odd or gas-burning one never aborts it. It never reads a key or sends unless `BROADCAST` is set. `contracts/script/managed/DeployManagedPool.s.sol`
   never gives the deployer the owner's power: another owner's `addPair` calls come out as Safe calldata.
+  `contracts/script/managed/DeployManagedOracleAdapters.s.sol` and `contracts/script/managed/DeployManagedBufferHelpers.s.sol`
+  deploy only a managed pool's price adapters and Veda buffer helpers, which are immutable and give their deployer
+  no role, so they only deploy and log what an operator reviews.
