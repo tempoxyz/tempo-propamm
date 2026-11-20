@@ -367,7 +367,6 @@ a Veda NAV engine, at the new one.
 The hook-based managed rework requires a new immutable deployment. Historical pair-wide and per-taker-fee
 pools cannot be upgraded and are not evidence for this ABI. The hook-based core is deployed on Tempo mainnet
 ([Mainnet core](#mainnet-core)); no pool is recorded here.
-The core was audited by Sigma Prime at `0569025`, but the audit does not authorize production deployment.
 
 A `ManagedDirectPropAMM` is deployed paused, with its pairs `Closed`, and the deployment moves no inventory.
 Tokens donated to its predicted address before deployment may already be present. It is then opened in this order: sponsors and
