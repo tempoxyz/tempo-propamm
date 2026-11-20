@@ -428,7 +428,8 @@ The managed suites hold the pool to its two references and its own invariants:
   partitions, never an underlying user's direct-trading credits.
 
 The `ManagedDirectPropAMM` suites and its scripts' suites (`contracts/test/managed/DeployManagedPool.t.sol`,
-`contracts/test/managed/ManagedPoolAccess.t.sol`) run on mocks, whose tokens forward a transfer to a virtual address registered
+`contracts/test/managed/ManagedPoolAccess.t.sol`, `contracts/test/managed/DeployManagedOracleAdapters.t.sol`,
+`contracts/test/managed/DeployManagedBufferHelpers.t.sol`) run on mocks, whose tokens forward a transfer to a virtual address registered
 in `MockVirtualAddressRegistry` to its master, as Tempo's TIP-20 does, and CI also runs them under `--network tempo`.
 There the deploy script's suite probes pathUSD itself, and `contracts/test/managed/ManagedDirectPropAMMTempo.t.sol` and
 `contracts/test/managed/ManagedDirectPropAMMRegression.t.sol` use the TIP-1022 address registry itself and TIP-20 factory
@@ -466,6 +467,17 @@ makes the tokens, oracles and pool in the simulation), the deploy on both chains
 forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedPoolRun --sig 'runWithPairs()' \
   --network tempo --chain 4217 --sender 0x7e57d2a1000000000000000000000000000c0de1
 forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:ManagedPoolAccessRun --sig 'runModes()' \
+  --network tempo --chain 42431 --sender 0x7e57d2a1000000000000000000000000000c0de1
+```
+
+After any change to `contracts/script/managed/DeployManagedOracleAdapters.s.sol`,
+`contracts/script/managed/DeployManagedBufferHelpers.s.sol` or the contracts they deploy, run their guards in the same
+file, on both chains (the adapter run puts the USDY wrapper's code at Ondo's canonical address on mainnet):
+
+```bash
+forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedOracleAdaptersRun --sig 'runAdapters()' \
+  --network tempo --chain 4217 --sender 0x7e57d2a1000000000000000000000000000c0de1
+forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedBufferHelpersRun --sig 'runHelpers()' \
   --network tempo --chain 42431 --sender 0x7e57d2a1000000000000000000000000000c0de1
 ```
 
@@ -639,3 +651,8 @@ lib/               public Foundry dependencies (submodules)
   pool's deployment block, replays every access event against the chain, describing admin contracts with raw probes,
   bounded in gas and answer size, so an odd or gas-burning one never aborts it. It never reads a key or sends unless `BROADCAST` is set. `contracts/script/managed/DeployManagedPool.s.sol`
   never gives the deployer the owner's power: another owner's `addPair` calls come out as Safe calldata.
+  `contracts/script/managed/DeployManagedOracleAdapters.s.sol` and `contracts/script/managed/DeployManagedBufferHelpers.s.sol`
+  deploy only a managed pool's price adapters and Veda buffer helpers, which are immutable and give their deployer
+  no role: the first refuses a source whose description, decimals or fresh positive observation differ from the
+  reviewed ones, or that disagrees with a named existing oracle; the second refuses a pool that is not managed and a
+  pair whose live tokens are not the expected ones, and only warns about a vault not yet admitted or a pair hook.

@@ -256,6 +256,17 @@ jobs:
             --network tempo --chain 42431 --sender "$DEPLOYER"
           DEPLOYER_ADDRESS="$DEPLOYER" BROADCAST=false forge script contracts/script/managed/DeployManagedCore.s.sol \
             --network tempo --chain 4217 --sender "$DEPLOYER"
+          # DeployManagedOracleAdapters and DeployManagedBufferHelpers: one adapter of each kind over sources made in the
+          # simulation (on mainnet the USDY wrapper's code sits at Ondo's canonical address), and one vault's helper on
+          # a pool and pair made there, which must deploy without a warning.
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedOracleAdaptersRun --sig 'runAdapters()' \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedOracleAdaptersRun --sig 'runAdapters()' \
+            --network tempo --chain 4217 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedBufferHelpersRun --sig 'runHelpers()' \
+            --network tempo --chain 42431 --sender "$DEPLOYER"
+          forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedBufferHelpersRun --sig 'runHelpers()' \
+            --network tempo --chain 4217 --sender "$DEPLOYER"
 
   sdk:
     name: Rust SDK
