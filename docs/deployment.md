@@ -391,7 +391,7 @@ power over them. One entry per adapter:
 | `DEPLOYER_ADDRESS` | Sends one CREATE per adapter, in order |
 | `ORACLE_KINDS` | `CHAINLINK` (the feed's own decimals), `CHAINLINK_18_TO_8` (an 18-decimal feed read at 8, rounded down) or `ONDO_USDY` (Ondo's wrapper, 18 decimals) |
 | `ORACLE_SOURCES` | The AggregatorV3 feed, or Ondo's wrapper (on mainnet only the canonical one) |
-| `ORACLE_SOURCE_DESCRIPTIONS` | Separated by `\|`: the feed's exact `description()`, or `-` for `ONDO_USDY` |
+| `ORACLE_SOURCE_DESCRIPTIONS` | Separated by `\|`: the feed's exact `description()`, or `-` for `ONDO_USDY`. Single-quote it in the env file |
 | `ORACLE_DECIMALS` | What the adapter must answer: the pair's price precision for good |
 | `ORACLE_MAX_AGES` | The pair's planned `maxOracleAge`, 1 second to 365 days: the source must be that fresh now |
 | `ORACLE_REFERENCES` | An existing `IPriceOracle` the adapter must agree with now, or the zero address |
