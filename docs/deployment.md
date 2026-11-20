@@ -365,8 +365,9 @@ a Veda NAV engine, at the new one.
 ## Managed pools
 
 The hook-based managed rework requires a new immutable deployment. Historical pair-wide and per-taker-fee
-pools cannot be upgraded and are not evidence for this ABI. No hook-based redeployment is recorded here;
-the core was audited by Sigma Prime at `0569025`, but the audit does not authorize production deployment.
+pools cannot be upgraded and are not evidence for this ABI. The hook-based core is deployed on Tempo mainnet
+([Mainnet core](#mainnet-core)); no pool is recorded here.
+The core was audited by Sigma Prime at `0569025`, but the audit does not authorize production deployment.
 
 A `ManagedDirectPropAMM` is deployed paused, with its pairs `Closed`, and the deployment moves no inventory.
 Tokens donated to its predicted address before deployment may already be present. It is then opened in this order: sponsors and
@@ -375,6 +376,40 @@ check the result, and print the target, value 0 and calldata for that sender's S
 send nothing unless Forge gets `--broadcast` and the sender's own signer (`--ledger` or `--account`).
 `ManagedPoolAccess` additionally requires `BROADCAST=true`; without it, even `--broadcast` only simulates the
 access change and prints “Not sent.” `DeployManagedPool` does not use this environment switch.
+
+### Mainnet core
+
+The managed core is deployed on Tempo mainnet (chain ID 4217): one `PoolFactory`, whose constructor created the pool
+implementation and the default `Settler`. See the [manifest](../deployments/tempo-mainnet/managed-core.json).
+
+| Contract | Address |
+| --- | --- |
+| PoolFactory | `0x61e5C6b8B737930d07025eC88B34B307F61e162c` |
+| Pool implementation | `0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b` |
+| Settler | `0xf8Ed0Ed4D960f1F400400dA717Aba69708049595` |
+
+Deployment transaction: [50003213](https://explore.tempo.xyz/tx/0x32602a48d4be4075be9b8630737dd5c2c4c67e7a486069e363c22ae0bcd6e5b4), on 2026-11-20. Deployer:
+`0xcC4957A13A225eA1BfC85346D48B7de2Cb2cE374`, protocol nonce 252, ending at 253. The receipt succeeded; it used
+18,034,564 gas and the wallet paid 0.010821 USDC.e in fees (fee token `0x20C000000000000000000000b9537d11c60E8b50`).
+The transaction is a single CREATE carrying `PoolFactory`'s creation code, the transaction
+`contracts/script/managed/DeployManagedCore.s.sol` simulates; that simulation predicted all three addresses. No pool,
+pair or inventory was created, and the deployer holds no role in the core.
+
+Source: `bdeb16b6323d8955ccb87764af566687a3003f1c`, built with Foundry v1.8.1 and the pinned Solar compiler
+(`0.8.30+commit.d83529b.solar.0.2.0`). Its `contracts/src/managed` sources, compiler pin and dependencies match the
+audited commit `0569025`. After deployment, the runtime code of all three contracts equalled a fresh build at that
+commit with only the immutables differing; `factory.implementation()` and `factory.defaultSettler()` return the
+addresses above; the implementation and the Settler name the factory; the implementation has a zero owner and
+cannot be initialized; and the factory reports neither as a pool.
+
+Tempo's source verifier returned `exact_match` for all three contracts:
+[PoolFactory](https://contracts.tempo.xyz/verify-ui/jobs/9812fdd5-9c45-4121-83b0-203635006d34),
+[ManagedDirectPropAMM](https://contracts.tempo.xyz/verify-ui/jobs/f2488fde-e540-40cc-8232-b7fd18cc791e), and
+[Settler](https://contracts.tempo.xyz/verify-ui/jobs/7aa8e66b-d7c4-4afa-91c8-d2bf1e8cb117).
+
+A maker's pool is a clone: `PoolFactory.createPool(owner, salt)` creates it paused, with no pairs, at the address
+`predictPool(creator, owner, salt)` returns. `DeployManagedPool.s.sol` below instead deploys a standalone pool
+with no factory, which the shared Settler does not accept.
 
 ### Deploy a managed pool
 

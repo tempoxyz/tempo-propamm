@@ -1,0 +1,17 @@
+{
+  "chainId": 4217,
+  "compiler": "0.8.30+commit.d83529b.solar.0.2.0",
+  "contracts": {
+    "poolFactory": "0x61e5C6b8B737930d07025eC88B34B307F61e162c",
+    "poolImplementation": "0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b",
+    "settler": "0xf8Ed0Ed4D960f1F400400dA717Aba69708049595"
+  },
+  "creationCodeHash": "0xb3c0c176afe504ad6b9a293042970a502187ce74832652265cc054babd983606",
+  "deployer": "0xcC4957A13A225eA1BfC85346D48B7de2Cb2cE374",
+  "deployerNonce": 252,
+  "network": "tempo-mainnet",
+  "sourceCommit": "bdeb16b6323d8955ccb87764af566687a3003f1c",
+  "startBlock": 50003213,
+  "status": "verified",
+  "transaction": "0x32602a48d4be4075be9b8630737dd5c2c4c67e7a486069e363c22ae0bcd6e5b4"
+}

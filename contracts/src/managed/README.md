@@ -13,6 +13,24 @@ This guide covers integration with three core contracts: `ManagedDirectPropAMM`,
 vulnerabilities found ([audits](../../../audits/README.md)).
 Routers and hook implementations were out of scope. Deployed code is immutable; owners manage pool configuration.
 
+## Deployments
+
+### Tempo mainnet (chain ID 4217)
+
+Deployed on 2026-11-20 from `bdeb16b`, whose managed sources match the audited commit `0569025`. The three core
+contracts have verified source.
+
+| Contract | Address |
+|---|---|
+| PoolFactory | [0x61e5C6b8B737930d07025eC88B34B307F61e162c](https://explore.tempo.xyz/address/0x61e5C6b8B737930d07025eC88B34B307F61e162c) |
+| Pool implementation | [0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b](https://explore.tempo.xyz/address/0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b) |
+| Settler (the factory's default) | [0xf8Ed0Ed4D960f1F400400dA717Aba69708049595](https://explore.tempo.xyz/address/0xf8Ed0Ed4D960f1F400400dA717Aba69708049595) |
+
+The deployer holds no role in this core, and the deployment created no pool, pair or inventory: each maker creates
+its own pool with `PoolFactory.createPool(owner, salt)`. See the
+[mainnet manifest](../../../deployments/tempo-mainnet/managed-core.json) and the
+[deployment record](../../../docs/deployment.md#mainnet-core).
+
 ## Why this is useful for Earn vaults
 
 Earn vaults convert between yield-bearing assets and the stablecoin used for deposits and redemptions.
