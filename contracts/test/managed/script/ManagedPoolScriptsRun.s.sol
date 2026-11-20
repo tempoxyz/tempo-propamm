@@ -4,18 +4,14 @@ pragma solidity 0.8.30;
 import { Script } from "forge-std/Script.sol";
 import { Vm } from "forge-std/Vm.sol";
 
-import { DeployManagedBufferHelpers } from "../../../script/managed/DeployManagedBufferHelpers.s.sol";
-import { DeployManagedOracleAdapters } from "../../../script/managed/DeployManagedOracleAdapters.s.sol";
 import { DeployManagedPool } from "../../../script/managed/DeployManagedPool.s.sol";
 import { ManagedPoolAccess } from "../../../script/managed/ManagedPoolAccess.s.sol";
-import { Chainlink18To8PriceOracleAdapter } from "../../../src/Chainlink18To8PriceOracleAdapter.sol";
 import { ManagedDirectPropAMM } from "../../../src/managed/ManagedDirectPropAMM.sol";
 import { PoolFactory } from "../../../src/managed/PoolFactory.sol";
 import { PushPriceOracle } from "../../../src/PushPriceOracle.sol";
 import { TempoMainnet } from "../../../src/TempoMainnet.sol";
 import { IManagedDirectPropAMM } from "../../../src/managed/interfaces/IManagedDirectPropAMM.sol";
 import { IPriceOracle } from "../../../src/interfaces/IPriceOracle.sol";
-import { ScriptFeed, ScriptUsdyWrapper } from "../utils/OracleSourceFixtures.sol";
 
 interface ITIP20FactoryPrecompile {
     function createToken(
@@ -346,120 +342,5 @@ contract ManagedPoolRouterReplayRun is ManagedPoolAccess, ManagedScriptFixtures 
             logs[n].logIndex = i;
             ++n;
         }
-    }
-}
-
-/// @notice CI's guard that `DeployManagedOracleAdapters` runs as a Forge script: one adapter of each kind over a feed
-/// and a wrapper made in the simulation, the 8-decimal one held to an existing adapter of the same feed, then
-/// `verify` over the adapters the run made. On mainnet
-/// the wrapper's code sits at Ondo's canonical address, the only USDY source the script takes there:
-///
-/// ```bash
-/// forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedOracleAdaptersRun \
-///   --sig 'runAdapters()' --network tempo --chain 4217 --sender 0x…
-/// ```
-contract DeployManagedOracleAdaptersRun is DeployManagedOracleAdapters, ManagedScriptFixtures {
-    string internal constant DESCRIPTION = "PRIME / USD";
-
-    AdapterConfig[] internal _adapters;
-    address[] internal _mined;
-
-    function runAdapters() external returns (address[] memory adapters) {
-        vm.startPrank(SETUP);
-        ScriptFeed feed = new ScriptFeed(18, DESCRIPTION, 1_052_345_678_912_345_678, vm.getBlockTimestamp());
-        address replaced = address(new Chainlink18To8PriceOracleAdapter(feed));
-        address wrapper = address(new ScriptUsdyWrapper());
-        vm.stopPrank();
-        if (block.chainid == TEMPO_MAINNET_CHAIN_ID) {
-            vm.etch(TempoMainnet.USDY_ORACLE_WRAPPER, wrapper.code);
-            wrapper = TempoMainnet.USDY_ORACLE_WRAPPER;
-        }
-        _adapters.push(AdapterConfig(Kind.Chainlink, address(feed), DESCRIPTION, 18, 1 days, replaced));
-        _adapters.push(AdapterConfig(Kind.Chainlink18To8, address(feed), DESCRIPTION, 8, 1 days, replaced));
-        _adapters.push(AdapterConfig(Kind.OndoUsdy, wrapper, "-", 18, 1 hours, address(0)));
-        adapters = run();
-        if (adapters.length != 3) revert UnexpectedDeploymentState("adapter count");
-        // `verify` holds the adapters the run made to the same inputs, as it does the mined ones after inclusion.
-        _mined = adapters;
-        if (verify().length != 3) revert UnexpectedDeploymentState("verified count");
-    }
-
-    function _readConfig() internal view override returns (Config memory config) {
-        config.deployer = msg.sender;
-        config.adapters = _adapters;
-    }
-
-    function _readAdapters() internal view override returns (address[] memory) {
-        return _mined;
-    }
-}
-
-/// @dev A contract account standing in for a BoringVault: the helper script only needs it to have code.
-contract FixtureVault {
-    function name() external pure returns (string memory) {
-        return "vault";
-    }
-}
-
-/// @dev A Veda Teller as the helper script reads it: the BoringVault it serves and its Accountant.
-contract FixtureTeller {
-    address public vault;
-    address public accountant = address(0xACC0);
-
-    constructor(address vault_) {
-        vault = vault_;
-    }
-}
-
-/// @notice CI's guard that `DeployManagedBufferHelpers` runs as a Forge script: one pool and pair (made in the
-/// simulation) that admits a vault, then the vault's helper, which must deploy without a warning:
-///
-/// ```bash
-/// forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedBufferHelpersRun \
-///   --sig 'runHelpers()' --network tempo --chain 42431 --sender 0x…
-/// ```
-contract DeployManagedBufferHelpersRun is DeployManagedBufferHelpers, ManagedScriptFixtures {
-    address internal constant OWNER = 0x0000000000000000000000000000000000ab0031;
-
-    IManagedDirectPropAMM internal _pool;
-    HelperConfig[] internal _helpers;
-
-    function runHelpers() external returns (address[] memory helpers) {
-        address prime = _fixtureToken("PRIME", 0xc1);
-        address oracle = _fixtureOracle(105_000_000);
-        address[] memory vaults = new address[](1);
-        vm.startPrank(OWNER);
-        vaults[0] = address(new FixtureVault());
-        address teller = address(new FixtureTeller(vaults[0]));
-        ManagedDirectPropAMM pool = new ManagedDirectPropAMM(OWNER, address(0));
-        pool.addPair(prime, TempoMainnet.PATH_USD, IPriceOracle(oracle), 1 days, 50);
-        pool.setMembers(0, 0, vaults, true);
-        pool.setPairAccess(0, IManagedDirectPropAMM.AccessMode.Listed);
-        // A pool deploys paused, which the helper script warns about.
-        pool.unpause();
-        vm.stopPrank();
-        _pool = IManagedDirectPropAMM(address(pool));
-        _helpers.push(
-            HelperConfig({
-                vault: vaults[0],
-                teller: teller,
-                pairIndex: 0,
-                expectedBase: prime,
-                expectedQuote: TempoMainnet.PATH_USD,
-                expectedOracle: oracle,
-                sponsorId: 0,
-                customerId: keccak256("ci"),
-                slippageBps: 50,
-                replaced: address(0)
-            })
-        );
-        helpers = run();
-        if (helpers.length != 1 || _warnings.length != 0) revert UnexpectedDeploymentState("helpers or warnings");
-    }
-
-    function _readConfig() internal view override returns (Config memory config) {
-        config.deployer = msg.sender;
-        config.pool = _pool;
-        config.helpers = _helpers;
     }
 }

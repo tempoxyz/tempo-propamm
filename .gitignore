@@ -14,8 +14,6 @@ deployments/tempo-mainnet/*.json
 !deployments/tempo-mainnet/propamm-v2.json
 # DeployV2 dry runs record simulated addresses only.
 deployments/*/propamm-v2.dry-run.json
-# An operator's feed descriptions for DeployManagedOracleAdapters, copied from the example beside its env template.
-deployments/managed-oracle-descriptions.txt
 
 # Never commit signing material.
 *.keystore

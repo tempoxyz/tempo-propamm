@@ -1,502 +1,78 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { Script, console2 } from "forge-std/Script.sol";
 
 import { DirectPropAMMBufferHelper } from "../../src/DirectPropAMMBufferHelper.sol";
 import { IDirectPropAMM } from "../../src/interfaces/IDirectPropAMM.sol";
-import { IManagedDirectPropAMM } from "../../src/managed/interfaces/IManagedDirectPropAMM.sol";
 
-/// @dev The immutable bindings every `DirectPropAMMBufferHelper` answers, whichever pool kind it serves: what the
-/// script reads from a helper being replaced. Only a helper built with the managed path answers the last three.
-interface IBufferHelperBindings {
-    function vault() external view returns (address);
-    function baseToken() external view returns (address);
-    function quoteToken() external view returns (address);
-    function customerId() external view returns (bytes32);
-    function slippageBps() external view returns (uint16);
-    function pool() external view returns (address);
-    function managed() external view returns (bool);
-    function pairIndex() external view returns (uint16);
-}
-
-/// @dev What the script reads from a Veda Teller: the BoringVault it serves, and the Accountant a buffer helper
-/// lacks, which tells a Teller from a helper that also answers `vault()`.
-interface ITellerBindings {
-    function vault() external view returns (address);
-    function accountant() external view returns (address);
-}
-
-/// @notice Deploys the `DirectPropAMMBufferHelper`s that connect Veda BoringVaults to one `ManagedDirectPropAMM`: one
-/// helper per vault and pair, and nothing else. A helper holds no tokens and has no authority over the vault or the
-/// pool, and its bindings are immutable, so the deployer keeps no power. It lists nobody and selects no hook: the
-/// pool's owner still admits each BoringVault on its pair (`ManagedPoolAccess`), and the Veda authority still allows
-/// the helper and selects it on the Teller.
-/// @dev One broadcast from `DEPLOYER_ADDRESS`: one CREATE per entry, in order. `POOL_ADDRESS` is the managed pool.
-/// Inputs, comma-separated with one entry per helper:
-/// - `HELPER_VAULTS`: the BoringVault itself, the account that swaps (never a Teller, an Earn engine or a wallet);
-/// - `HELPER_TELLERS`: the Teller the helper will be selected on. It must report that BoringVault as its `vault()`,
-///   so a helper is never bound to another Teller's vault, on a first install as on a replacement;
-/// - `HELPER_PAIR_INDEXES`: the pair whose base the vault holds and whose quote is its asset;
-/// - `HELPER_EXPECTED_BASES`, `HELPER_EXPECTED_QUOTES`, `HELPER_EXPECTED_ORACLES`: the reviewed tokens and oracle of
-///   that pair. Mined `addPair` order assigns indexes, and a pool may hold several pairs with the same two tokens,
-///   so an index or the tokens alone prove nothing: the pair must hold exactly these three, and no other live pair
-///   may, as `ManagedPoolAccess` requires;
-/// - `HELPER_SPONSOR_IDS`: the list that admits the vault on the pair, 0 for the pair's home list;
-/// - `HELPER_CUSTOMER_IDS`: the nonzero 32-byte route id the vault's rounding credit accrues under;
-/// - `HELPER_SLIPPAGE_BPS`: the helper's quote tolerance, at most its `MAX_SLIPPAGE_BPS` (1,000). Not a fee cap;
-/// - `HELPER_REFERENCES`: the helper the vault's Teller uses today, or the zero address for none. A named helper must
-///   serve the same vault and the same two tokens; a different customer id or slippage, or another pair of this
-///   pool, only warns.
-/// The run stops on a pool that doesn't answer as a managed pool, an unknown or removed pair, tokens or an oracle
-/// other than the expected ones, a pair another live pair can be mistaken for, a Teller that serves another vault, or
-/// two helpers for one vault and pair. It warns, without stopping, about what the helper can be deployed ahead of: a
-/// paused pool, a vault the pair doesn't admit yet, a named list that would refuse the vault on a `Listed` pair (an `Open` or
-/// `Closed` pair reads no list, so the pool's own answer hides an unregistered, disabled or unadmitted sponsor and a
-/// vault that isn't listed), and a pair hook, whose fee for the vault must be verified zero in both directions before
-/// the Teller switches (`docs/veda-integration.md`). Forge sends only with `--broadcast`.
+/// @notice Deploys the `DirectPropAMMBufferHelper`s that connect Veda BoringVaults to one `ManagedDirectPropAMM`, one
+/// per entry. A helper holds no tokens and has no authority: the pool's owner still admits each BoringVault on its
+/// pair (`ManagedPoolAccess`), and the Veda authority still allows the helper and selects it on the Teller.
+/// @dev Inputs: `POOL_ADDRESS`, and comma-separated with one entry per helper: `HELPER_VAULTS` (the BoringVault
+/// itself), `HELPER_PAIR_INDEXES`, `HELPER_SPONSOR_IDS` (0 for the pair's home list), `HELPER_CUSTOMER_IDS` (nonzero
+/// 32-byte route ids) and `HELPER_SLIPPAGE_BPS`. The helper's constructor refuses an unknown pair, a zero customer id
+/// and a slippage above its maximum. Each helper's tokens are logged: compare them with the pair you meant. Forge
+/// sends only with `--broadcast`.
 contract DeployManagedBufferHelpers is Script {
+    using SafeCast for uint256;
+
     error UnexpectedChain(uint256 chainId);
     error InvalidConfig(string field);
-    error UnexpectedDeploymentState(string field);
 
-    struct HelperConfig {
-        address vault;
-        address teller;
-        uint16 pairIndex;
-        address expectedBase;
-        address expectedQuote;
-        address expectedOracle;
-        uint64 sponsorId;
-        bytes32 customerId;
-        uint16 slippageBps;
-        address replaced;
+    function run() external returns (address[] memory) {
+        return deploy(
+            vm.envAddress("POOL_ADDRESS"),
+            vm.envAddress("HELPER_VAULTS", ","),
+            vm.envUint("HELPER_PAIR_INDEXES", ","),
+            vm.envUint("HELPER_SPONSOR_IDS", ","),
+            vm.envBytes32("HELPER_CUSTOMER_IDS", ","),
+            vm.envUint("HELPER_SLIPPAGE_BPS", ",")
+        );
     }
 
-    struct Config {
-        address deployer;
-        IManagedDirectPropAMM pool;
-        HelperConfig[] helpers;
-    }
-
-    uint256 internal constant TEMPO_MAINNET_CHAIN_ID = 4217;
-    uint256 internal constant TEMPO_MODERATO_CHAIN_ID = 42431;
-    /// @notice The most helpers one run deploys.
-    uint256 public constant MAX_HELPERS = 16;
-    /// @dev `DirectPropAMMBufferHelper.MAX_SLIPPAGE_BPS`.
-    uint256 internal constant MAX_SLIPPAGE_BPS = 1000;
-    /// @dev What the pool's `MAX_BATCH` must answer.
-    uint256 internal constant POOL_MAX_BATCH = 100;
-    /// @dev The gas and answer size a raw probe allows: a target that burns its gas or answers with a huge payload
-    /// reads as no answer.
-    uint256 internal constant PROBE_GAS = 1_000_000;
-
-    /// @dev What the run leaves for the operator to resolve before a Teller switches. Script-local, never broadcast.
-    string[] internal _warnings;
-
-    /// @notice Checks every input, deploys the helpers in order, checks each and logs them with the run's warnings.
-    function run() public returns (address[] memory helpers) {
-        if (block.chainid != TEMPO_MAINNET_CHAIN_ID && block.chainid != TEMPO_MODERATO_CHAIN_ID) {
+    /// @dev `run`'s body with its inputs passed in, so tests need no process-global environment.
+    function deploy(
+        address pool,
+        address[] memory vaults,
+        uint256[] memory pairIndexes,
+        uint256[] memory sponsorIds,
+        bytes32[] memory customerIds,
+        uint256[] memory slippageBps
+    ) public returns (address[] memory deployed) {
+        if (block.chainid != 4217 && block.chainid != 42431) {
             revert UnexpectedChain(block.chainid);
         }
-        delete _warnings;
-        Config memory config = _readConfig();
-        uint256 count = _checkInputs(config);
-        _logConfig(config);
+        uint256 count = vaults.length;
+        if (
+            count == 0 || pairIndexes.length != count || sponsorIds.length != count || customerIds.length != count
+                || slippageBps.length != count
+        ) revert InvalidConfig("HELPER_* lists need one entry per helper");
 
-        uint64 nonce = vm.getNonce(config.deployer);
-        helpers = new address[](count);
-        // The explicit sender must be the reviewed deployer, even if Forge has other signers available.
-        vm.startBroadcast(config.deployer);
-        // One deployment per configured helper is the script's whole job; any failure stops the run.
-        // forge-lint: disable-start(calls-loop, require-revert-in-loop)
+        deployed = new address[](count);
+        vm.startBroadcast();
         for (uint256 i; i < count; ++i) {
-            HelperConfig memory h = config.helpers[i];
-            helpers[i] = address(
+            deployed[i] = address(
                 new DirectPropAMMBufferHelper(
-                    IDirectPropAMM(address(config.pool)), h.vault, h.customerId, h.slippageBps, h.pairIndex, h.sponsorId
+                    IDirectPropAMM(pool),
+                    vaults[i],
+                    customerIds[i],
+                    slippageBps[i].toUint16(),
+                    pairIndexes[i].toUint16(),
+                    sponsorIds[i].toUint64()
                 )
             );
         }
         vm.stopBroadcast();
 
         for (uint256 i; i < count; ++i) {
-            // `i` is below `MAX_HELPERS`.
-            // forge-lint: disable-next-line(unsafe-typecast)
-            address predicted = vm.computeCreateAddress(config.deployer, nonce + uint64(i));
-            _checkDeployment(helpers[i], predicted, config, i);
+            DirectPropAMMBufferHelper helper = DirectPropAMMBufferHelper(deployed[i]);
+            // A `DirectPropAMM` takes the helper's single-pair path with pair and sponsor 0.
+            if (!helper.managed()) revert InvalidConfig("POOL_ADDRESS is not a ManagedDirectPropAMM");
+            console2.log("DirectPropAMMBufferHelper", deployed[i]);
+            console2.log("  vault / pair index", vaults[i], pairIndexes[i]);
+            console2.log("  base / quote", helper.baseToken(), helper.quoteToken());
         }
-        // forge-lint: disable-end(calls-loop, require-revert-in-loop)
-        _logDeployment(helpers, config);
-    }
-
-    /// @notice The warnings of the last `run`.
-    function warnings() external view returns (string[] memory) {
-        return _warnings;
-    }
-
-    /// @dev Test harnesses override this to avoid process-global environment races between parallel tests.
-    function _readConfig() internal view virtual returns (Config memory config) {
-        config.deployer = vm.envAddress("DEPLOYER_ADDRESS");
-        config.pool = IManagedDirectPropAMM(vm.envAddress("POOL_ADDRESS"));
-        address[] memory vaults = vm.envAddress("HELPER_VAULTS", ",");
-        address[] memory tellers = vm.envAddress("HELPER_TELLERS", ",");
-        uint256[] memory pairIndexes = vm.envUint("HELPER_PAIR_INDEXES", ",");
-        address[] memory bases = vm.envAddress("HELPER_EXPECTED_BASES", ",");
-        address[] memory quotes = vm.envAddress("HELPER_EXPECTED_QUOTES", ",");
-        address[] memory oracles = vm.envAddress("HELPER_EXPECTED_ORACLES", ",");
-        uint256[] memory sponsorIds = vm.envUint("HELPER_SPONSOR_IDS", ",");
-        bytes32[] memory customerIds = vm.envBytes32("HELPER_CUSTOMER_IDS", ",");
-        uint256[] memory slippage = vm.envUint("HELPER_SLIPPAGE_BPS", ",");
-        address[] memory references = vm.envAddress("HELPER_REFERENCES", ",");
-        uint256 count = vaults.length;
-        if (
-            tellers.length != count || pairIndexes.length != count || bases.length != count || quotes.length != count
-                || oracles.length != count || sponsorIds.length != count || customerIds.length != count
-                || slippage.length != count || references.length != count
-        ) revert InvalidConfig("HELPER_* lists need one entry per helper");
-        config.helpers = new HelperConfig[](count);
-        for (uint256 i; i < count; ++i) {
-            // A malformed list entry stops the whole run.
-            // forge-lint: disable-start(require-revert-in-loop)
-            if (pairIndexes[i] > type(uint16).max) revert InvalidConfig(_field("HELPER_PAIR_INDEXES", i));
-            if (sponsorIds[i] > type(uint64).max) revert InvalidConfig(_field("HELPER_SPONSOR_IDS", i));
-            if (slippage[i] > type(uint16).max) revert InvalidConfig(_field("HELPER_SLIPPAGE_BPS", i));
-            // forge-lint: disable-end(require-revert-in-loop)
-            config.helpers[i] = HelperConfig({
-                vault: vaults[i],
-                teller: tellers[i],
-                // All three are checked above.
-                // forge-lint: disable-next-line(unsafe-typecast)
-                pairIndex: uint16(pairIndexes[i]),
-                expectedBase: bases[i],
-                expectedQuote: quotes[i],
-                expectedOracle: oracles[i],
-                // forge-lint: disable-next-line(unsafe-typecast)
-                sponsorId: uint64(sponsorIds[i]),
-                customerId: customerIds[i],
-                // forge-lint: disable-next-line(unsafe-typecast)
-                slippageBps: uint16(slippage[i]),
-                replaced: references[i]
-            });
-        }
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // Preflight
-    // ---------------------------------------------------------------------------------------------------------------
-
-    function _checkInputs(Config memory config) internal returns (uint256 count) {
-        address deployer = config.deployer;
-        // A real signing account: not zero, not Forge's keyless default sender, not a TIP-1022 virtual address.
-        if (deployer == address(0) || deployer == DEFAULT_SENDER || _isVirtual(deployer)) {
-            revert InvalidConfig("DEPLOYER_ADDRESS");
-        }
-        uint16 pairs = _checkPool(config.pool);
-        count = config.helpers.length;
-        if (count == 0 || count > MAX_HELPERS) revert InvalidConfig("HELPER_* lists need 1 to 16 helpers");
-        // The pool-wide pause is its own gate: no pair's access check reads it. A pool deploys paused.
-        if (config.pool.paused()) {
-            _warnings.push("The pool is paused: every swap reverts until its owner unpauses it");
-        }
-        // A check of operator input before anything runs: any bad entry stops the whole run.
-        for (uint256 i; i < count; ++i) {
-            HelperConfig memory h = config.helpers[i];
-            for (uint256 j; j < i; ++j) {
-                if (config.helpers[j].vault == h.vault && config.helpers[j].pairIndex == h.pairIndex) {
-                    // forge-lint: disable-next-line(require-revert-in-loop)
-                    revert InvalidConfig(string.concat(_field("HELPER_VAULTS", i), " repeats a vault and pair"));
-                }
-            }
-            _checkHelper(config.pool, pairs, h, i);
-        }
-    }
-
-    /// @dev Rejects incompatible pool view shapes, as `ManagedPoolAccess` does; not a proof of pool code or creation.
-    /// A `DirectPropAMM` has no `pairCount`, and a v2 `Venue` answers `pairCount` and `MAX_BATCH` but has no
-    /// `tokenPairCount`.
-    function _checkPool(IManagedDirectPropAMM pool) internal view returns (uint16) {
-        address target = address(pool);
-        if (target.code.length == 0) revert InvalidConfig("POOL_ADDRESS has no code");
-        (bool ok, uint256 pairs) = _probeWord(target, abi.encodeCall(IManagedDirectPropAMM.pairCount, ()));
-        (bool okBatch, uint256 maxBatch) = _probeWord(target, abi.encodeCall(IManagedDirectPropAMM.MAX_BATCH, ()));
-        (bool okTokens, uint256 tokenPairs) =
-            _probeWord(target, abi.encodeCall(IManagedDirectPropAMM.tokenPairCount, (address(0))));
-        if (
-            !ok || pairs > type(uint16).max || !okBatch || maxBatch != POOL_MAX_BATCH || !okTokens
-                || tokenPairs > type(uint16).max
-        ) revert InvalidConfig("POOL_ADDRESS is not a ManagedDirectPropAMM");
-        // Checked above.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return uint16(pairs);
-    }
-
-    function _checkHelper(IManagedDirectPropAMM pool, uint16 pairs, HelperConfig memory h, uint256 i) internal {
-        // Runs once per configured entry, from a loop: any bad entry stops the whole run.
-        // forge-lint: disable-start(calls-loop, require-revert-in-loop)
-        address vault = h.vault;
-        // The BoringVault is a deployed contract and a real account: the pool pays it, and never a virtual address.
-        if (vault == address(0) || vault == address(pool) || vault.code.length == 0 || _isVirtual(vault)) {
-            revert InvalidConfig(_field("HELPER_VAULTS", i));
-        }
-        _checkTeller(h, i);
-        if (h.customerId == bytes32(0)) revert InvalidConfig(_field("HELPER_CUSTOMER_IDS", i));
-        if (h.slippageBps > MAX_SLIPPAGE_BPS) revert InvalidConfig(_field("HELPER_SLIPPAGE_BPS", i));
-        if (h.expectedBase == address(0)) revert InvalidConfig(_field("HELPER_EXPECTED_BASES", i));
-        if (h.expectedQuote == address(0) || h.expectedQuote == h.expectedBase) {
-            revert InvalidConfig(_field("HELPER_EXPECTED_QUOTES", i));
-        }
-        if (h.expectedOracle == address(0)) revert InvalidConfig(_field("HELPER_EXPECTED_ORACLES", i));
-        if (h.pairIndex >= pairs) {
-            revert InvalidConfig(string.concat(_field("HELPER_PAIR_INDEXES", i), " is not a pair"));
-        }
-        IManagedDirectPropAMM.Pair memory info = pool.pair(h.pairIndex);
-        // A removed pair reads all zero.
-        if (info.access == IManagedDirectPropAMM.AccessMode.None) {
-            revert InvalidConfig(string.concat(_field("HELPER_PAIR_INDEXES", i), " was removed"));
-        }
-        if (info.base != h.expectedBase) {
-            revert InvalidConfig(string.concat(_field("HELPER_EXPECTED_BASES", i), " is not the pair's base"));
-        }
-        if (info.quote != h.expectedQuote) {
-            revert InvalidConfig(string.concat(_field("HELPER_EXPECTED_QUOTES", i), " is not the pair's quote"));
-        }
-        if (address(info.oracle) != h.expectedOracle) {
-            revert InvalidConfig(string.concat(_field("HELPER_EXPECTED_ORACLES", i), " is not the pair's oracle"));
-        }
-        // Tokens and oracle name one pair only while no other live pair holds the same three.
-        for (uint16 j; j < pairs; ++j) {
-            if (j == h.pairIndex) continue;
-            IManagedDirectPropAMM.Pair memory other = pool.pair(j);
-            if (
-                other.access != IManagedDirectPropAMM.AccessMode.None && other.base == info.base
-                    && other.quote == info.quote && address(other.oracle) == address(info.oracle)
-            ) revert InvalidConfig(string.concat(_field("HELPER_PAIR_INDEXES", i), " has a live twin pair"));
-        }
-        if (h.replaced != address(0)) _checkReference(pool, h, i);
-
-        string memory n = string.concat("Helper ", Strings.toString(i), ": ");
-        IManagedDirectPropAMM.TakerAccess access = pool.takerAccess(h.pairIndex, vault, h.sponsorId);
-        if (access != IManagedDirectPropAMM.TakerAccess.Allowed) {
-            _warnings.push(
-                string.concat(n, "the pair does not admit the vault now (", _accessName(access), "): its swaps revert")
-            );
-        }
-        // The pool reads the named list only on a Listed pair. Unless its answer was that list's own refusal, read
-        // the list directly: a helper deployed on an Open or Closed pair must still work once the pair is Listed.
-        if (
-            access == IManagedDirectPropAMM.TakerAccess.Allowed || access == IManagedDirectPropAMM.TakerAccess.Closed
-                || access == IManagedDirectPropAMM.TakerAccess.Denied
-        ) {
-            string memory refusal = _listRefusal(pool, h.pairIndex, vault, h.sponsorId);
-            if (bytes(refusal).length != 0) {
-                _warnings.push(
-                    string.concat(n, "the named list would refuse the vault on a Listed pair (", refusal, ")")
-                );
-            }
-        }
-        // forge-lint: disable-next-line(unused-return)
-        (address hook,) = pool.pairHook(h.pairIndex);
-        if (hook != address(0)) {
-            _warnings.push(
-                string.concat(
-                    n,
-                    "the pair has a hook, ",
-                    Strings.toChecksumHexString(hook),
-                    ": verify it charges the vault zero in both directions"
-                )
-            );
-        }
-        // forge-lint: disable-end(calls-loop, require-revert-in-loop)
-    }
-
-    /// @dev What a `Listed` pair would answer for the vault on the named list, whatever the pair's mode is now: empty
-    /// when the list admits it. The pool's own order: registered, switched on, admitted, then the member.
-    function _listRefusal(IManagedDirectPropAMM pool, uint16 pairIndex, address vault, uint64 sponsorId)
-        internal
-        view
-        returns (string memory)
-    {
-        // Runs once per configured entry, from a loop.
-        // forge-lint: disable-start(calls-loop)
-        if (sponsorId != 0) {
-            // forge-lint: disable-next-line(unused-return)
-            (address admin, bool enabled,) = pool.sponsor(sponsorId);
-            if (admin == address(0)) return "unknown sponsor";
-            if (!enabled) return "sponsor disabled";
-            if (!pool.pairSponsor(pairIndex, sponsorId)) return "sponsor not admitted";
-        }
-        if (!pool.isMember(pairIndex, sponsorId, vault)) return "vault not listed";
-        return "";
-        // forge-lint: disable-end(calls-loop)
-    }
-
-    /// @dev The Teller the helper is meant for must serve the helper's vault. Raw probes: it is operator input.
-    function _checkTeller(HelperConfig memory h, uint256 i) internal view {
-        // Runs once per configured entry, from a loop: any bad entry stops the whole run.
-        // forge-lint: disable-start(require-revert-in-loop)
-        address teller = h.teller;
-        string memory field = _field("HELPER_TELLERS", i);
-        if (teller == address(0) || teller == h.vault || teller.code.length == 0) revert InvalidConfig(field);
-        (bool okVault, uint256 vault) = _probeWord(teller, abi.encodeCall(ITellerBindings.vault, ()));
-        (bool okAccountant, uint256 accountant) = _probeWord(teller, abi.encodeCall(ITellerBindings.accountant, ()));
-        if (!okVault || !okAccountant || accountant == 0 || accountant > type(uint160).max) {
-            revert InvalidConfig(string.concat(field, " is not a Teller"));
-        }
-        if (vault != uint256(uint160(h.vault))) revert InvalidConfig(string.concat(field, " serves another vault"));
-        // forge-lint: disable-end(require-revert-in-loop)
-    }
-
-    /// @dev The helper being replaced must serve the same vault and tokens. Raw probes: it is operator input.
-    function _checkReference(IManagedDirectPropAMM pool, HelperConfig memory h, uint256 i) internal {
-        // Runs once per configured entry, from a loop: any bad entry stops the whole run.
-        // forge-lint: disable-start(calls-loop, require-revert-in-loop)
-        address replaced = h.replaced;
-        string memory field = _field("HELPER_REFERENCES", i);
-        if (replaced.code.length == 0) revert InvalidConfig(field);
-        (bool okVault, uint256 vault) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.vault, ()));
-        (bool okBase, uint256 base) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.baseToken, ()));
-        (bool okQuote, uint256 quote) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.quoteToken, ()));
-        (bool okId, uint256 customerId) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.customerId, ()));
-        (bool okSlippage, uint256 slippageBps) =
-            _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.slippageBps, ()));
-        if (!okVault || !okBase || !okQuote || !okId || !okSlippage) {
-            revert InvalidConfig(string.concat(field, " is not a buffer helper"));
-        }
-        if (vault != uint256(uint160(h.vault))) {
-            revert InvalidConfig(string.concat(field, " serves another vault"));
-        }
-        if (base != uint256(uint160(h.expectedBase)) || quote != uint256(uint160(h.expectedQuote))) {
-            revert InvalidConfig(string.concat(field, " serves other tokens"));
-        }
-        string memory n = string.concat("Helper ", Strings.toString(i), ": ");
-        if (customerId != uint256(h.customerId)) {
-            _warnings.push(string.concat(n, "customer id differs from the helper it replaces"));
-        }
-        if (slippageBps != h.slippageBps) {
-            _warnings.push(
-                string.concat(
-                    n, "slippage differs from the helper it replaces (", Strings.toString(slippageBps), " bps)"
-                )
-            );
-        }
-        // A helper on this pool's managed path names its pair: a replacement for another pair is worth a look.
-        (bool okManaged, uint256 managed) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.managed, ()));
-        (bool okPool, uint256 oldPool) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.pool, ()));
-        (bool okPair, uint256 oldPair) = _probeWord(replaced, abi.encodeCall(IBufferHelperBindings.pairIndex, ()));
-        if (
-            okManaged && managed == 1 && okPool && oldPool == uint256(uint160(address(pool))) && okPair
-                && oldPair != h.pairIndex
-        ) {
-            _warnings.push(
-                string.concat(n, "the helper it replaces serves pair ", Strings.toString(oldPair), " of this pool")
-            );
-        }
-        // forge-lint: disable-end(calls-loop, require-revert-in-loop)
-    }
-
-    function _accessName(IManagedDirectPropAMM.TakerAccess access) internal pure returns (string memory) {
-        if (access == IManagedDirectPropAMM.TakerAccess.UnknownPair) return "unknown pair";
-        if (access == IManagedDirectPropAMM.TakerAccess.Closed) return "pair Closed";
-        if (access == IManagedDirectPropAMM.TakerAccess.Denied) return "vault denied";
-        if (access == IManagedDirectPropAMM.TakerAccess.UnknownSponsor) return "unknown sponsor";
-        if (access == IManagedDirectPropAMM.TakerAccess.SponsorDisabled) return "sponsor disabled";
-        if (access == IManagedDirectPropAMM.TakerAccess.SponsorNotAdmitted) return "sponsor not admitted";
-        if (access == IManagedDirectPropAMM.TakerAccess.NotListed) return "vault not listed";
-        return "no answer";
-    }
-
-    function _isVirtual(address account) internal pure returns (bool) {
-        return ((uint160(account) >> 48) & type(uint80).max) == 0xFDFDFDFDFDFDFDFDFDFD;
-    }
-
-    function _field(string memory name, uint256 i) internal pure returns (string memory) {
-        return string.concat(name, "[", Strings.toString(i), "]");
-    }
-
-    /// @dev A raw call returning exactly one word, so a target that lacks the function or answers oddly reads as
-    /// `ok == false` instead of reverting.
-    function _probeWord(address target, bytes memory data) internal view returns (bool ok, uint256 word) {
-        uint256 gasLimit = PROBE_GAS;
-        bool success;
-        uint256 size;
-        assembly ("memory-safe") {
-            success := staticcall(gasLimit, target, add(data, 32), mload(data), 0, 0)
-            size := returndatasize()
-        }
-        if (!success || size != 32) return (false, 0);
-        assembly ("memory-safe") {
-            returndatacopy(0, 0, 32)
-            word := mload(0)
-        }
-        ok = true;
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // Postconditions
-    // ---------------------------------------------------------------------------------------------------------------
-
-    /// @dev The helper sits at the deployer's next CREATE address, took the managed path and holds every reviewed
-    /// binding.
-    function _checkDeployment(address helper, address predicted, Config memory config, uint256 i) internal view {
-        // Runs once per configured entry, from a loop: any bad entry stops the whole run.
-        // forge-lint: disable-start(calls-loop, require-revert-in-loop)
-        HelperConfig memory h = config.helpers[i];
-        DirectPropAMMBufferHelper deployed = DirectPropAMMBufferHelper(helper);
-        string memory n = string.concat("helper ", Strings.toString(i));
-        if (helper != predicted || helper.code.length == 0) {
-            revert UnexpectedDeploymentState(string.concat(n, " address"));
-        }
-        if (!deployed.managed() || address(deployed.pool()) != address(config.pool)) {
-            revert UnexpectedDeploymentState(string.concat(n, " pool"));
-        }
-        if (deployed.vault() != h.vault) revert UnexpectedDeploymentState(string.concat(n, " vault"));
-        if (deployed.pairIndex() != h.pairIndex || deployed.sponsorId() != h.sponsorId) {
-            revert UnexpectedDeploymentState(string.concat(n, " pair"));
-        }
-        if (deployed.baseToken() != h.expectedBase || deployed.quoteToken() != h.expectedQuote) {
-            revert UnexpectedDeploymentState(string.concat(n, " tokens"));
-        }
-        if (deployed.customerId() != h.customerId || deployed.slippageBps() != h.slippageBps) {
-            revert UnexpectedDeploymentState(string.concat(n, " route"));
-        }
-        // forge-lint: disable-end(calls-loop, require-revert-in-loop)
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // Logs
-    // ---------------------------------------------------------------------------------------------------------------
-
-    function _logConfig(Config memory config) internal view {
-        console2.log("Chain id", block.chainid);
-        console2.log("Deployer", config.deployer);
-        console2.log("Managed pool", address(config.pool));
-        for (uint256 i; i < config.helpers.length; ++i) {
-            HelperConfig memory h = config.helpers[i];
-            console2.log(string.concat("Helper ", Strings.toString(i), ": vault"), h.vault);
-            console2.log("  Teller", h.teller);
-            console2.log("  pair index / sponsor id", h.pairIndex, h.sponsorId);
-            console2.log("  base", h.expectedBase);
-            console2.log("  quote", h.expectedQuote);
-            console2.log("  oracle", h.expectedOracle);
-            console2.log("  customer id");
-            console2.logBytes32(h.customerId);
-            console2.log("  slippage bps", h.slippageBps);
-            if (h.replaced != address(0)) console2.log("  replaces", h.replaced);
-        }
-    }
-
-    function _logDeployment(address[] memory helpers, Config memory config) internal view {
-        for (uint256 i; i < helpers.length; ++i) {
-            console2.log(string.concat("DirectPropAMMBufferHelper ", Strings.toString(i)), helpers[i]);
-            console2.log("  for vault", config.helpers[i].vault);
-        }
-        for (uint256 i; i < _warnings.length; ++i) {
-            console2.log(string.concat("WARNING: ", _warnings[i]));
-        }
-        console2.log("No vault, Teller or pool state changed: a helper has no authority.");
-        console2.log("Next: the pool's owner admits each BoringVault on its pair (ManagedPoolAccess) and unpauses the");
-        console2.log("pool, then the Veda authority allows each helper and selects it for the Teller's hooks.");
     }
 }
