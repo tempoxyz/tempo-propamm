@@ -6,9 +6,27 @@ trade.
 
 > **Status:** v2 was audited by Sigma Prime ([audits](audits/README.md)) and its core is deployed on Tempo mainnet (see the
 > [v2 guide](contracts/src/v2/README.md#deployments)). The managed pool core (`contracts/src/managed`) was audited by
-> Sigma Prime and needs new immutable deployments before use. `DirectPropAMM` and its buffer helper were reviewed by Sigma Prime with
+> Sigma Prime and is deployed on Tempo mainnet (see the [managed guide](contracts/src/managed/README.md#deployments));
+> each maker creates its own pool from the factory. `DirectPropAMM` and its buffer helper were reviewed by Sigma Prime with
 > Earn; the other v1 contracts are unaudited, and there is no supported v1 deployment.
 > `Registry` is a separate, unaudited discovery sidecar and is not deployed.
+
+## Deployments
+
+Tempo mainnet (chain ID 4217). Every contract below has verified source; neither deployment left its deployer a role.
+
+| System | Contract | Address |
+| --- | --- | --- |
+| v2 | VenueFactory | [0x7b71Cd1F47EB6b98fD5aF5167872ce378fc7136b](https://explore.tempo.xyz/address/0x7b71Cd1F47EB6b98fD5aF5167872ce378fc7136b) |
+| v2 | Settler | [0xDD683c32d7379a8353b5b23E9a8159A2831F65b6](https://explore.tempo.xyz/address/0xDD683c32d7379a8353b5b23E9a8159A2831F65b6) |
+| v2 | Venue implementation | [0xEc207E702C5eEC03b79fb687e82049ed60BF64F3](https://explore.tempo.xyz/address/0xEc207E702C5eEC03b79fb687e82049ed60BF64F3) |
+| Managed | PoolFactory | [0x61e5C6b8B737930d07025eC88B34B307F61e162c](https://explore.tempo.xyz/address/0x61e5C6b8B737930d07025eC88B34B307F61e162c) |
+| Managed | Settler | [0xf8Ed0Ed4D960f1F400400dA717Aba69708049595](https://explore.tempo.xyz/address/0xf8Ed0Ed4D960f1F400400dA717Aba69708049595) |
+| Managed | Pool implementation | [0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b](https://explore.tempo.xyz/address/0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b) |
+
+The two Settlers are different contracts: approve the one for the system you trade on. Records:
+[v2](docs/v2-deployment.md#mainnet-deployment) and [managed](docs/deployment.md#mainnet-core). Testnet deployments
+are in each guide.
 
 ## Choose a contract
 
