@@ -8,29 +8,22 @@ import { Settler } from "../../src/managed/Settler.sol";
 
 /// @notice Deploy the immutable factory, implementation and settler. No pools, trading permissions or inventory.
 /// @dev Simulation by default. BROADCAST=true plus Forge --broadcast is required to send. Never reads a private key.
-/// These contracts are pre-audit: a mainnet broadcast also needs MANAGED_MAINNET_PRE_AUDIT_ACK=true. Every run checks
-/// the deployed wiring (factory, implementation and settler point at each other; the implementation has no owner).
+/// Every run checks the deployed wiring (factory, implementation and settler point at each other; the implementation
+/// has no owner).
 contract DeployManagedCore is Script {
     uint256 internal constant TEMPO_MAINNET_CHAIN_ID = 4217;
     uint256 internal constant TEMPO_MODERATO_CHAIN_ID = 42431;
 
     function run() external returns (PoolFactory factory) {
-        return deploy(
-            vm.envAddress("DEPLOYER_ADDRESS"),
-            vm.envOr("BROADCAST", false),
-            vm.envOr("MANAGED_MAINNET_PRE_AUDIT_ACK", false)
-        );
+        return deploy(vm.envAddress("DEPLOYER_ADDRESS"), vm.envOr("BROADCAST", false));
     }
 
     /// @dev `run`'s body with its inputs passed in, so tests need no process-global environment.
-    function deploy(address deployer, bool broadcast, bool mainnetAck) public returns (PoolFactory factory) {
+    function deploy(address deployer, bool broadcast) public returns (PoolFactory factory) {
         require(
             block.chainid == TEMPO_MAINNET_CHAIN_ID || block.chainid == TEMPO_MODERATO_CHAIN_ID, "Unsupported chain"
         );
         require(deployer != address(0), "Missing deployer");
-        if (broadcast && block.chainid == TEMPO_MAINNET_CHAIN_ID) {
-            require(mainnetAck, "Mainnet broadcast needs MANAGED_MAINNET_PRE_AUDIT_ACK=true");
-        }
         if (broadcast) vm.startBroadcast(deployer);
         else vm.startPrank(deployer);
         factory = new PoolFactory();

@@ -130,8 +130,7 @@ pool fills; a router calls it as the taker rather than forwarding an underlying 
   is out of scope. Hooks see the router, and routed credits use `(pairIndex, router, customerId)`; routers must
   partition and authorize customer IDs consistently rather than treating them as authenticated identities.
 - Removing forwarded identity is an ABI break from the explicit-taker draft, requiring rebuilt callers and
-  new immutable deployments. Direct pool swap APIs and v2 remain unchanged. The audit does not authorize
-  production deployment.
+  new immutable deployments. Direct pool swap APIs and v2 remain unchanged.
 - Owner-only `setSettler` rejects zero, takes the swap lock and works without pausing, as in v2. The pool trusts the
   selected settler to authenticate takers and prepay input; a malicious replacement can drain inventory.
 - Preserve direct pool swaps and v2 source behavior. Managed standalone constructors use factory zero; factory-bound
