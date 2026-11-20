@@ -22,6 +22,9 @@ fs_permissions = [
     { access = "read-write", path = "./deployments" },
     # contracts/test/v2/DeployV2.t.sol writes its manifests here instead of into deployments/.
     { access = "read-write", path = "./cache/propamm-v2-deploy-test" },
+    # contracts/test/managed/DeployManagedOracleAdapters.t.sol writes its feed-description files here. The script
+    # itself reads an operator's file from deployments/, the only path it may read outside the tests.
+    { access = "read-write", path = "./cache/managed-oracle-adapters-test" },
 ]
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",

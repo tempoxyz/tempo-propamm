@@ -472,7 +472,8 @@ forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:ManagedPo
 
 After any change to `contracts/script/managed/DeployManagedOracleAdapters.s.sol`,
 `contracts/script/managed/DeployManagedBufferHelpers.s.sol` or the contracts they deploy, run their guards in the same
-file, on both chains (the adapter run puts the USDY wrapper's code at Ondo's canonical address on mainnet):
+file, on both chains (the adapter run puts the USDY wrapper's code at Ondo's canonical address on mainnet, and
+runs `verify` over the adapters it made):
 
 ```bash
 forge script contracts/test/managed/script/ManagedPoolScriptsRun.s.sol:DeployManagedOracleAdaptersRun --sig 'runAdapters()' \
@@ -654,5 +655,10 @@ lib/               public Foundry dependencies (submodules)
   `contracts/script/managed/DeployManagedOracleAdapters.s.sol` and `contracts/script/managed/DeployManagedBufferHelpers.s.sol`
   deploy only a managed pool's price adapters and Veda buffer helpers, which are immutable and give their deployer
   no role: the first refuses a source whose description, decimals or fresh positive observation differ from the
-  reviewed ones, or that disagrees with a named existing oracle; the second refuses a pool that is not managed and a
-  pair whose live tokens are not the expected ones, and only warns about a vault not yet admitted or a pair hook.
+  reviewed ones, or that disagrees with a named existing oracle. It reads descriptions from a data file under
+  `deployments/`, never from the sourced env file, and its `verify` holds the mined adapters to the same inputs
+  after inclusion, since an adapter reads its feed again when it is mined. The second refuses a pool that is not
+  managed, a pair whose live tokens and oracle are not the expected ones or that another live pair matches, and a
+  Teller that serves another vault; it only warns about a vault not yet admitted, a named list that would refuse the
+  vault on a `Listed` pair, or a pair hook. Only `DeployManagedPool` refuses an oracle a second pair names: the
+  pool's `addPair` and `setOracle` accept one another pair already reads.

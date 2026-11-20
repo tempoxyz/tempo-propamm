@@ -350,7 +350,8 @@ contract ManagedPoolRouterReplayRun is ManagedPoolAccess, ManagedScriptFixtures 
 }
 
 /// @notice CI's guard that `DeployManagedOracleAdapters` runs as a Forge script: one adapter of each kind over a feed
-/// and a wrapper made in the simulation, the 8-decimal one held to an existing adapter of the same feed. On mainnet
+/// and a wrapper made in the simulation, the 8-decimal one held to an existing adapter of the same feed, then
+/// `verify` over the adapters the run made. On mainnet
 /// the wrapper's code sits at Ondo's canonical address, the only USDY source the script takes there:
 ///
 /// ```bash
@@ -361,6 +362,7 @@ contract DeployManagedOracleAdaptersRun is DeployManagedOracleAdapters, ManagedS
     string internal constant DESCRIPTION = "PRIME / USD";
 
     AdapterConfig[] internal _adapters;
+    address[] internal _mined;
 
     function runAdapters() external returns (address[] memory adapters) {
         vm.startPrank(SETUP);
@@ -377,11 +379,18 @@ contract DeployManagedOracleAdaptersRun is DeployManagedOracleAdapters, ManagedS
         _adapters.push(AdapterConfig(Kind.OndoUsdy, wrapper, "-", 18, 1 hours, address(0)));
         adapters = run();
         if (adapters.length != 3) revert UnexpectedDeploymentState("adapter count");
+        // `verify` holds the adapters the run made to the same inputs, as it does the mined ones after inclusion.
+        _mined = adapters;
+        if (verify().length != 3) revert UnexpectedDeploymentState("verified count");
     }
 
     function _readConfig() internal view override returns (Config memory config) {
         config.deployer = msg.sender;
         config.adapters = _adapters;
+    }
+
+    function _readAdapters() internal view override returns (address[] memory) {
+        return _mined;
     }
 }
 
@@ -389,6 +398,16 @@ contract DeployManagedOracleAdaptersRun is DeployManagedOracleAdapters, ManagedS
 contract FixtureVault {
     function name() external pure returns (string memory) {
         return "vault";
+    }
+}
+
+/// @dev A Veda Teller as the helper script reads it: the BoringVault it serves and its Accountant.
+contract FixtureTeller {
+    address public vault;
+    address public accountant = address(0xACC0);
+
+    constructor(address vault_) {
+        vault = vault_;
     }
 }
 
@@ -411,13 +430,27 @@ contract DeployManagedBufferHelpersRun is DeployManagedBufferHelpers, ManagedScr
         address[] memory vaults = new address[](1);
         vm.startPrank(OWNER);
         vaults[0] = address(new FixtureVault());
+        address teller = address(new FixtureTeller(vaults[0]));
         ManagedDirectPropAMM pool = new ManagedDirectPropAMM(OWNER, address(0));
         pool.addPair(prime, TempoMainnet.PATH_USD, IPriceOracle(oracle), 1 days, 50);
         pool.setMembers(0, 0, vaults, true);
         pool.setPairAccess(0, IManagedDirectPropAMM.AccessMode.Listed);
         vm.stopPrank();
         _pool = IManagedDirectPropAMM(address(pool));
-        _helpers.push(HelperConfig(vaults[0], 0, prime, TempoMainnet.PATH_USD, 0, keccak256("ci"), 50, address(0)));
+        _helpers.push(
+            HelperConfig({
+                vault: vaults[0],
+                teller: teller,
+                pairIndex: 0,
+                expectedBase: prime,
+                expectedQuote: TempoMainnet.PATH_USD,
+                expectedOracle: oracle,
+                sponsorId: 0,
+                customerId: keccak256("ci"),
+                slippageBps: 50,
+                replaced: address(0)
+            })
+        );
         helpers = run();
         if (helpers.length != 1 || _warnings.length != 0) revert UnexpectedDeploymentState("helpers or warnings");
     }

@@ -40,6 +40,16 @@ contract ScriptVault {
     }
 }
 
+/// @dev A Veda Teller as the script reads it: the BoringVault it serves and its Accountant.
+contract ScriptTeller {
+    address public vault;
+    address public accountant = address(0xACC0);
+
+    constructor(address vault_) {
+        vault = vault_;
+    }
+}
+
 /// @dev Answers `pairCount` and `MAX_BATCH` like a v2 `Venue`, but has no `tokenPairCount`.
 contract VenueShaped {
     function pairCount() external pure returns (uint256) {
@@ -69,6 +79,9 @@ contract DeployManagedBufferHelpersTest is Test {
     ManagedDirectPropAMM internal pool;
     address internal vaultA;
     address internal vaultB;
+    MockOracle internal usdyOracle;
+    MockOracle internal primeOracle;
+    mapping(address vault => address teller) internal tellerOf;
 
     function setUp() external {
         vm.warp(1_000_000);
@@ -79,10 +92,14 @@ contract DeployManagedBufferHelpersTest is Test {
         usdc = new MockTIP20("USDC.e", 6);
         vaultA = address(new ScriptVault());
         vaultB = address(new ScriptVault());
+        tellerOf[vaultA] = address(new ScriptTeller(vaultA));
+        tellerOf[vaultB] = address(new ScriptTeller(vaultB));
+        usdyOracle = new MockOracle(18, 1.137e18, block.timestamp);
+        primeOracle = new MockOracle(8, PRICE, block.timestamp);
         pool = new ManagedDirectPropAMM(address(this), address(0));
         // Pair 0 is USDY/USDC.e, pair 1 PRIME/USDC.e: both share the quote token.
-        pool.addPair(address(usdy), address(usdc), new MockOracle(18, 1.137e18, block.timestamp), 90_000, 50);
-        assertEq(pool.addPair(address(prime), address(usdc), new MockOracle(8, PRICE, block.timestamp), 90_000, 50), 1);
+        pool.addPair(address(usdy), address(usdc), usdyOracle, 90_000, 50);
+        assertEq(pool.addPair(address(prime), address(usdc), primeOracle, 90_000, 50), 1);
         pool.addSponsor(PARTNER, partner);
         pool.setPairSponsor(PRIME_PAIR, PARTNER, true);
         // Vault A is on the PRIME pair's home list, vault B on the partner's list there.
@@ -144,10 +161,12 @@ contract DeployManagedBufferHelpersTest is Test {
         script.setInput(c);
         assertEq(script.run().length, 1);
         warnings = script.warnings();
-        assertEq(warnings.length, 2, "the last run's warnings only");
+        assertEq(warnings.length, 3, "the last run's warnings only");
         assertEq(warnings[0], "Helper 0: the pair does not admit the vault now (pair Closed): its swaps revert");
+        // A Closed pair reads no list, so the pool's answer says nothing about it: the script reads it directly.
+        assertEq(warnings[1], "Helper 0: the named list would refuse the vault on a Listed pair (vault not listed)");
         assertEq(
-            warnings[1],
+            warnings[2],
             string.concat(
                 "Helper 0: the pair has a hook, ",
                 vm.toString(hook),
@@ -325,10 +344,161 @@ contract DeployManagedBufferHelpersTest is Test {
         }
     }
 
+    /// @dev A pool may hold several live pairs with the same two tokens, so the tokens alone do not name the pair:
+    /// its oracle must be the reviewed one, and no other live pair may share all three.
+    function test_refusesAnotherPairWithTheSameTokens() external {
+        MockOracle other = new MockOracle(8, PRICE + 1, block.timestamp);
+        assertEq(pool.addPair(address(prime), address(usdc), other, 90_000, 50), 2);
+        pool.setMembers(2, 0, _one(vaultA), true);
+        pool.setPairAccess(2, IManagedDirectPropAMM.AccessMode.Listed);
+
+        // The other PRIME pair's index with the reviewed pair's tokens and oracle: live, admitted, and refused.
+        DeployManagedBufferHelpers.Config memory c = _config(1);
+        c.helpers[0] = _helper(vaultA, 2, address(prime), 0, ID_A, 50);
+        script.setInput(c);
+        _expectInvalid("HELPER_EXPECTED_ORACLES[0] is not the pair's oracle");
+        script.run();
+        // Naming that pair's own oracle is a reviewed choice of it, and the reviewed pair still deploys.
+        c.helpers[0].expectedOracle = address(other);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        assertEq(script.warnings().length, 0);
+        c.helpers[0] = _helper(vaultA, PRIME_PAIR, address(prime), 0, ID_A, 50);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        uint64 nonce = vm.getNonce(deployer);
+
+        c.helpers[0].expectedOracle = address(0);
+        script.setInput(c);
+        _expectInvalid("HELPER_EXPECTED_ORACLES[0]");
+        script.run();
+
+        // A twin holds the same tokens and oracle: nothing reviewed tells the two apart, whichever is named.
+        assertEq(pool.addPair(address(prime), address(usdc), primeOracle, 90_000, 50), 3);
+        c.helpers[0] = _helper(vaultA, PRIME_PAIR, address(prime), 0, ID_A, 50);
+        script.setInput(c);
+        _expectInvalid("HELPER_PAIR_INDEXES[0] has a live twin pair");
+        script.run();
+        c.helpers[0].pairIndex = 3;
+        script.setInput(c);
+        _expectInvalid("HELPER_PAIR_INDEXES[0] has a live twin pair");
+        script.run();
+        assertEq(vm.getNonce(deployer), nonce, "a refused run sends nothing");
+
+        // A removed twin is no longer live.
+        pool.removePair(3);
+        c.helpers[0].pairIndex = PRIME_PAIR;
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+    }
+
+    /// @dev A managed helper being replaced names its pair: a replacement for another pair of the pool warns.
+    function test_warnsWhenTheReplacedHelperServesAnotherPairOfThePool() external {
+        MockOracle other = new MockOracle(8, PRICE + 1, block.timestamp);
+        assertEq(pool.addPair(address(prime), address(usdc), other, 90_000, 50), 2);
+        pool.setMembers(2, 0, _one(vaultA), true);
+        pool.setPairAccess(2, IManagedDirectPropAMM.AccessMode.Listed);
+        address old =
+            address(new DirectPropAMMBufferHelper(IDirectPropAMM(address(pool)), vaultA, ID_A, 50, PRIME_PAIR, 0));
+
+        DeployManagedBufferHelpers.Config memory c = _config(1);
+        c.helpers[0] = _helper(vaultA, 2, address(prime), 0, ID_A, 50);
+        c.helpers[0].expectedOracle = address(other);
+        c.helpers[0].replaced = old;
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        string[] memory warnings = script.warnings();
+        assertEq(warnings.length, 1);
+        assertEq(warnings[0], "Helper 0: the helper it replaces serves pair 1 of this pool");
+    }
+
+    /// @dev The Teller the helper is meant for names the vault independently of the vault entry, on a first install
+    /// too.
+    function test_refusesATellerThatServesAnotherVault() external {
+        pool.setMembers(PRIME_PAIR, 0, _one(vaultB), true);
+        DeployManagedBufferHelpers.Config memory c = _config(1);
+        // Vault B, admitted on the pair, entered for the helper meant for vault A's Teller.
+        c.helpers[0] = _helper(vaultB, PRIME_PAIR, address(prime), 0, ID_A, 50);
+        c.helpers[0].teller = tellerOf[vaultA];
+        script.setInput(c);
+        _expectInvalid("HELPER_TELLERS[0] serves another vault");
+        script.run();
+
+        // A vault is not a Teller, and neither is a buffer helper, which also answers vault().
+        c.helpers[0] = _helper(vaultA, PRIME_PAIR, address(prime), 0, ID_A, 50);
+        c.helpers[0].teller = vaultB;
+        script.setInput(c);
+        _expectInvalid("HELPER_TELLERS[0] is not a Teller");
+        script.run();
+        c.helpers[0].teller =
+            address(new DirectPropAMMBufferHelper(IDirectPropAMM(address(pool)), vaultA, ID_A, 50, PRIME_PAIR, 0));
+        script.setInput(c);
+        _expectInvalid("HELPER_TELLERS[0] is not a Teller");
+        script.run();
+
+        address[3] memory bad = [address(0), vaultA, makeAddr("no code")];
+        for (uint256 i; i < bad.length; ++i) {
+            c.helpers[0].teller = bad[i];
+            script.setInput(c);
+            _expectInvalid("HELPER_TELLERS[0]");
+            script.run();
+        }
+        assertEq(vm.getNonce(deployer), 0);
+    }
+
+    /// @dev An Open pair admits any caller without reading a list, so the pool's answer hides a list that would
+    /// refuse the vault once the pair is Listed. The script reads the list itself.
+    function test_warnsAboutAListThatWouldRefuseTheVaultOnAnOpenPair() external {
+        pool.pause();
+        pool.setPairAccess(PRIME_PAIR, IManagedDirectPropAMM.AccessMode.Open);
+        pool.unpause();
+        string memory prefix = "Helper 0: the named list would refuse the vault on a Listed pair (";
+
+        // On its home list: nothing to say.
+        DeployManagedBufferHelpers.Config memory c = _config(1);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        assertEq(script.warnings().length, 0);
+
+        // An unregistered sponsor id would be immutable in the helper.
+        c.helpers[0] = _helper(vaultA, PRIME_PAIR, address(prime), 999, ID_A, 50);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        _assertOneWarning(string.concat(prefix, "unknown sponsor)"));
+
+        // A registered, admitted sponsor that does not list the vault.
+        c.helpers[0] = _helper(vaultA, PRIME_PAIR, address(prime), PARTNER, ID_A, 50);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        _assertOneWarning(string.concat(prefix, "vault not listed)"));
+
+        // One that lists it but is not admitted on the pair, then one switched off.
+        c.helpers[0] = _helper(vaultB, PRIME_PAIR, address(prime), PARTNER, ID_B, 50);
+        script.setInput(c);
+        assertEq(script.run().length, 1);
+        assertEq(script.warnings().length, 0);
+        pool.setPairSponsor(PRIME_PAIR, PARTNER, false);
+        assertEq(script.run().length, 1);
+        _assertOneWarning(string.concat(prefix, "sponsor not admitted)"));
+        pool.setSponsorEnabled(PARTNER, false);
+        assertEq(script.run().length, 1);
+        _assertOneWarning(string.concat(prefix, "sponsor disabled)"));
+
+        // On a Listed pair the pool's own answer is the list's refusal, reported once.
+        pool.setPairAccess(PRIME_PAIR, IManagedDirectPropAMM.AccessMode.Listed);
+        assertEq(script.run().length, 1);
+        _assertOneWarning("Helper 0: the pair does not admit the vault now (sponsor disabled): its swaps revert");
+    }
+
     function test_readsTheEnvironment() external {
         vm.setEnv("DEPLOYER_ADDRESS", vm.toString(deployer));
         vm.setEnv("POOL_ADDRESS", vm.toString(address(pool)));
         vm.setEnv("HELPER_VAULTS", string.concat(vm.toString(vaultA), ",", vm.toString(vaultB)));
+        vm.setEnv("HELPER_TELLERS", string.concat(vm.toString(tellerOf[vaultA]), ",", vm.toString(tellerOf[vaultB])));
+        vm.setEnv(
+            "HELPER_EXPECTED_ORACLES",
+            string.concat(vm.toString(address(primeOracle)), ",", vm.toString(address(usdyOracle)))
+        );
         vm.setEnv("HELPER_PAIR_INDEXES", "1,0");
         vm.setEnv("HELPER_EXPECTED_BASES", string.concat(vm.toString(address(prime)), ",", vm.toString(address(usdy))));
         vm.setEnv("HELPER_EXPECTED_QUOTES", string.concat(vm.toString(address(usdc)), ",", vm.toString(address(usdc))));
@@ -341,6 +511,10 @@ contract DeployManagedBufferHelpersTest is Test {
         assertEq(address(c.pool), address(pool));
         assertEq(c.helpers.length, 2);
         assertEq(c.helpers[0].vault, vaultA);
+        assertEq(c.helpers[0].teller, tellerOf[vaultA]);
+        assertEq(c.helpers[1].teller, tellerOf[vaultB]);
+        assertEq(c.helpers[0].expectedOracle, address(primeOracle));
+        assertEq(c.helpers[1].expectedOracle, address(usdyOracle));
         assertEq(c.helpers[0].pairIndex, 1);
         assertEq(c.helpers[0].expectedBase, address(prime));
         assertEq(c.helpers[1].expectedBase, address(usdy));
@@ -365,6 +539,14 @@ contract DeployManagedBufferHelpersTest is Test {
         vm.setEnv("HELPER_SLIPPAGE_BPS", "50");
         _expectInvalid("HELPER_* lists need one entry per helper");
         script.readEnvConfig();
+        vm.setEnv("HELPER_SLIPPAGE_BPS", "50,25");
+        vm.setEnv("HELPER_TELLERS", vm.toString(tellerOf[vaultA]));
+        _expectInvalid("HELPER_* lists need one entry per helper");
+        script.readEnvConfig();
+        vm.setEnv("HELPER_TELLERS", string.concat(vm.toString(tellerOf[vaultA]), ",", vm.toString(tellerOf[vaultB])));
+        vm.setEnv("HELPER_EXPECTED_ORACLES", vm.toString(address(primeOracle)));
+        _expectInvalid("HELPER_* lists need one entry per helper");
+        script.readEnvConfig();
     }
 
     // ---------------------------------------------------------------- helpers
@@ -385,14 +567,22 @@ contract DeployManagedBufferHelpersTest is Test {
     {
         return DeployManagedBufferHelpers.HelperConfig({
             vault: vault,
+            teller: tellerOf[vault],
             pairIndex: pairIndex,
             expectedBase: base,
             expectedQuote: address(usdc),
+            expectedOracle: pairIndex == 0 ? address(usdyOracle) : address(primeOracle),
             sponsorId: sponsorId,
             customerId: customerId,
             slippageBps: bps,
             replaced: address(0)
         });
+    }
+
+    function _assertOneWarning(string memory expected) internal view {
+        string[] memory warnings = script.warnings();
+        assertEq(warnings.length, 1);
+        assertEq(warnings[0], expected);
     }
 
     function _one(address account) internal pure returns (address[] memory accounts) {

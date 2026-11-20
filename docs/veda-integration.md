@@ -267,8 +267,9 @@ remaining holders from paying another user's costs.
    and sponsor id (0 for the home list). An unknown or removed pair reverts `InvalidPair`. For a `DirectPropAMM` pass
    0 for both; anything else reverts `PairIndexUnsupported` or `SponsorIdUnsupported`.
    `contracts/script/managed/DeployManagedBufferHelpers.s.sol` deploys one helper per vault and pair with these
-   checks ([runbook](deployment.md#deploy-the-vaults-buffer-helpers)); it may run before step 1, and then warns that
-   the pair does not admit the vault yet.
+   checks ([runbook](deployment.md#deploy-the-vaults-buffer-helpers)), and requires the pair's reviewed oracle and
+   the Teller that serves the vault; it may run before step 1, and then warns that the pair does not admit the vault
+   yet.
 3. Verify `helper.managed()`, `helper.pairIndex()` and `helper.sponsorId()`, the helper's base and quote against
    `pool.pair(pairIndex)`, and that `pool.takerAccess(pairIndex, BoringVault, sponsorId)` reads `Allowed` (1). Any
    other value names the refusal a swap would revert with.

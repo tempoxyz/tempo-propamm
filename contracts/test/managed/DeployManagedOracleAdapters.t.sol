@@ -16,9 +16,28 @@ import { ScriptFeed, ScriptUsdyWrapper } from "./utils/OracleSourceFixtures.sol"
 /// @dev Reads its inputs from storage instead of the process environment, which parallel tests share.
 contract DeployManagedOracleAdaptersHarness is DeployManagedOracleAdapters {
     bytes internal _encoded;
+    address[] internal _mined;
 
     function setInput(Config calldata config) external {
         _encoded = abi.encode(config);
+    }
+
+    function setAdapters(address[] calldata adapters) external {
+        _mined = adapters;
+    }
+
+    /// @notice The real descriptions-file reader, without the environment.
+    function readDescriptions(string calldata path) external view returns (string[] memory) {
+        return _readDescriptions(path);
+    }
+
+    /// @notice The real environment reader of `verify`'s adapter list.
+    function readEnvAdapters() external view returns (address[] memory) {
+        return super._readAdapters();
+    }
+
+    function _readAdapters() internal view override returns (address[] memory) {
+        return _mined;
     }
 
     /// @notice The real environment reader, for the one test that sets the environment.
@@ -57,6 +76,7 @@ contract DeployManagedOracleAdaptersTest is Test {
         vm.chainId(MODERATO);
         observedAt = block.timestamp - 600;
         script = new DeployManagedOracleAdaptersHarness();
+        vm.createDir("cache/managed-oracle-adapters-test", true);
         feed18 = new ScriptFeed(18, PRIME_DESCRIPTION, PRIME_18, observedAt);
         feed8 = new ScriptFeed(8, "EUR / USD", 108_000_000, observedAt);
         wrapper = new ScriptUsdyWrapper();
@@ -94,7 +114,7 @@ contract DeployManagedOracleAdaptersTest is Test {
         assertEq(address(ChainlinkPriceOracleAdapter(adapters[3]).feed()), address(feed8));
     }
 
-    /// @dev Two pairs on one feed need an adapter each: the pool refuses an oracle a second pair already uses.
+    /// @dev Two pairs on one feed need an adapter each: `DeployManagedPool` refuses an oracle a second pair names.
     function test_oneSourceMayBackSeveralAdapters() external {
         DeployManagedOracleAdapters.Config memory c = _config(2);
         c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(feed18), PRIME_DESCRIPTION, 18);
@@ -212,12 +232,12 @@ contract DeployManagedOracleAdaptersTest is Test {
         DeployManagedOracleAdapters.Config memory c = _config(1);
         c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(feed18), "PRIME / EUR", 18);
         script.setInput(c);
-        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS[0]: the feed says \"PRIME / USD\"");
+        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS_FILE[0]: the feed says \"PRIME / USD\"");
         script.run();
 
         c.adapters[0].description = "-";
         script.setInput(c);
-        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS[0]");
+        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS_FILE[0]");
         script.run();
 
         c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(feed18), PRIME_DESCRIPTION, 8);
@@ -263,7 +283,7 @@ contract DeployManagedOracleAdaptersTest is Test {
         DeployManagedOracleAdapters.Config memory c = _config(1);
         c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.OndoUsdy, address(wrapper), "USDY / USD", 18);
         script.setInput(c);
-        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS[0] must be -");
+        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS_FILE[0] must be -");
         script.run();
 
         c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.OndoUsdy, address(wrapper), "-", 8);
@@ -333,7 +353,10 @@ contract DeployManagedOracleAdaptersTest is Test {
                 vm.toString(address(feed18)), ",", vm.toString(address(wrapper)), ",", vm.toString(address(feed8))
             )
         );
-        vm.setEnv("ORACLE_SOURCE_DESCRIPTIONS", "PRIME / USD|-|EUR / USD");
+        // One description per line, read as data: a final newline and Windows line ends are dropped.
+        string memory file = "cache/managed-oracle-adapters-test/reads-the-environment.txt";
+        vm.writeFile(file, "PRIME / USD\r\n-\nEUR / USD\n");
+        vm.setEnv("ORACLE_SOURCE_DESCRIPTIONS_FILE", file);
         vm.setEnv("ORACLE_DECIMALS", "8,18,8");
         vm.setEnv("ORACLE_MAX_AGES", "90000,3600,7200");
         vm.setEnv(
@@ -365,6 +388,127 @@ contract DeployManagedOracleAdaptersTest is Test {
         vm.setEnv("ORACLE_DECIMALS", "8,18");
         _expectInvalid("ORACLE_* lists need one entry per adapter");
         script.readEnvConfig();
+        vm.setEnv("ORACLE_DECIMALS", "8,18,8");
+
+        // A line too few, and a file Forge may not read.
+        vm.writeFile(file, "PRIME / USD\n-\n");
+        _expectInvalid("ORACLE_* lists need one entry per adapter");
+        script.readEnvConfig();
+        vm.setEnv("ORACLE_SOURCE_DESCRIPTIONS_FILE", "cache/managed-oracle-adapters-test/missing.txt");
+        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS_FILE is unreadable: keep it under deployments/");
+        script.readEnvConfig();
+        vm.setEnv("ORACLE_SOURCE_DESCRIPTIONS_FILE", ".env.managed-oracle-adapters");
+        _expectInvalid("ORACLE_SOURCE_DESCRIPTIONS_FILE is unreadable: keep it under deployments/");
+        script.readEnvConfig();
+
+        vm.setEnv("ORACLE_ADAPTERS", string.concat(vm.toString(address(feed18)), ",", vm.toString(address(feed8))));
+        address[] memory adapters = script.readEnvAdapters();
+        assertEq(adapters.length, 2);
+        assertEq(adapters[1], address(feed8));
+    }
+
+    /// @dev A description is data in a file Forge reads, never text a shell evaluates: quotes, semicolons, pipes and
+    /// substitutions in it reach the comparison with the feed's own description unchanged.
+    function test_descriptionsAreReadAsDataWhateverTheyHold() external {
+        string memory hostile = "X / USD'; touch pwned; : '|$(id) `id` \"";
+        ScriptFeed odd = new ScriptFeed(8, hostile, 108_000_000, observedAt);
+        string memory file = "cache/managed-oracle-adapters-test/hostile-description.txt";
+        vm.writeFile(file, string.concat(hostile, "\n"));
+        // Only one test may set the process environment, so this one calls the file reader itself.
+        string[] memory lines = script.readDescriptions(file);
+        assertEq(lines.length, 1);
+        assertEq(lines[0], hostile);
+        DeployManagedOracleAdapters.Config memory c = _config(1);
+        c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(odd), lines[0], 8);
+        script.setInput(c);
+        assertEq(script.run().length, 1, "the feed's own description matches byte for byte");
+    }
+
+    /// @dev `verify` holds mined adapters to the run's inputs and sends nothing.
+    function test_verifyHoldsMinedAdaptersToTheReviewedInputs() external {
+        DeployManagedOracleAdapters.Config memory c = _config(3);
+        c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(feed18), PRIME_DESCRIPTION, 18);
+        c.adapters[1] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink18To8, address(feed18), PRIME_DESCRIPTION, 8);
+        c.adapters[2] = _adapter(DeployManagedOracleAdapters.Kind.OndoUsdy, address(wrapper), "-", 18);
+        script.setInput(c);
+        address[] memory mined = script.run();
+        uint64 nonce = vm.getNonce(deployer);
+
+        script.setAdapters(mined);
+        address[] memory verified = script.verify();
+        assertEq(verified.length, 3);
+        assertEq(verified[2], mined[2]);
+        assertEq(vm.getNonce(deployer), nonce, "verify sends nothing");
+
+        // The wrong order: the 8-decimal adapter where the native one was reviewed. Same feed, other decimals.
+        address[] memory swapped = new address[](3);
+        (swapped[0], swapped[1], swapped[2]) = (mined[1], mined[0], mined[2]);
+        script.setAdapters(swapped);
+        _expectState("adapter 0 decimals");
+        script.verify();
+
+        // An adapter of another feed, a contract that is no adapter, and an address without code.
+        address[] memory other = new address[](3);
+        (other[0], other[1], other[2]) = (address(new ChainlinkPriceOracleAdapter(feed8)), mined[1], mined[2]);
+        script.setAdapters(other);
+        _expectState("adapter 0 source");
+        script.verify();
+        other[0] = address(wrapper);
+        script.setAdapters(other);
+        _expectState("adapter 0 source");
+        script.verify();
+        other[0] = makeAddr("no code");
+        script.setAdapters(other);
+        _expectState("adapter 0 address");
+        script.verify();
+        // A USDY adapter where a Chainlink one was reviewed answers no feed().
+        other[0] = mined[2];
+        script.setAdapters(other);
+        _expectState("adapter 0 source");
+        script.verify();
+
+        // One adapter may back only one pair, and every reviewed entry needs its adapter.
+        address[] memory twice = new address[](3);
+        (twice[0], twice[1], twice[2]) = (mined[0], mined[1], mined[1]);
+        script.setAdapters(twice);
+        _expectInvalid("ORACLE_ADAPTERS[2]");
+        script.verify();
+        address[] memory short = new address[](2);
+        (short[0], short[1]) = (mined[0], mined[1]);
+        script.setAdapters(short);
+        _expectInvalid("ORACLE_ADAPTERS needs one entry per adapter");
+        script.verify();
+
+        script.setAdapters(mined);
+        vm.chainId(1);
+        vm.expectRevert(abi.encodeWithSelector(DeployManagedOracleAdapters.UnexpectedChain.selector, 1));
+        script.verify();
+    }
+
+    /// @dev A native adapter fixes its feed's decimals when its CREATE is mined, after the simulation that checked
+    /// them. One mined while the feed answered other decimals is caught by `verify`, never by `run`.
+    function test_verifyCatchesAnAdapterMinedWithOtherFeedDecimals() external {
+        DeployManagedOracleAdapters.Config memory c = _config(1);
+        c.adapters[0] = _adapter(DeployManagedOracleAdapters.Kind.Chainlink, address(feed18), PRIME_DESCRIPTION, 18);
+        script.setInput(c);
+        assertEq(script.run().length, 1, "the simulation saw 18 decimals");
+
+        // The feed answers 6 decimals in the block the adapter is mined, then 18 again. Decimals sit in slot 0.
+        vm.store(address(feed18), bytes32(0), bytes32(uint256(6)));
+        address[] memory mined = new address[](1);
+        mined[0] = address(new ChainlinkPriceOracleAdapter(feed18));
+        vm.store(address(feed18), bytes32(0), bytes32(uint256(18)));
+        assertEq(feed18.decimals(), 18);
+        assertEq(IPriceOracle(mined[0]).decimals(), 6);
+
+        script.setAdapters(mined);
+        _expectState("adapter 0 decimals");
+        script.verify();
+
+        // While the feed still answers the other decimals, the reviewed inputs themselves no longer hold.
+        vm.store(address(feed18), bytes32(0), bytes32(uint256(6)));
+        _expectInvalid("ORACLE_DECIMALS[0]: the feed has 6");
+        script.verify();
     }
 
     // ---------------------------------------------------------------- helpers
@@ -387,6 +531,10 @@ contract DeployManagedOracleAdaptersTest is Test {
             maxOracleAge: 90_000,
             baseline: address(0)
         });
+    }
+
+    function _expectState(string memory field) internal {
+        vm.expectRevert(abi.encodeWithSelector(DeployManagedOracleAdapters.UnexpectedDeploymentState.selector, field));
     }
 
     function _expectInvalid(string memory field) internal {

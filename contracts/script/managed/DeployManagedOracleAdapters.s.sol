@@ -12,17 +12,26 @@ import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IOndoUSDYOracleWrapper } from "../../src/interfaces/IOndoUSDYOracle.sol";
 import { IPriceOracle } from "../../src/interfaces/IPriceOracle.sol";
 
+/// @dev The immutable source getter of each adapter kind: what `verify` reads from a mined adapter.
+interface IPriceAdapterSource {
+    function feed() external view returns (address);
+    function wrapper() external view returns (address);
+}
+
 /// @notice Deploys the price adapters a `ManagedDirectPropAMM`'s pairs read, and nothing else: no pool, no role, no
 /// token. Each adapter is immutable and ownerless, so the deployer keeps no power over it. The pool's owner then
-/// passes the addresses to `addPair` (`DeployManagedPool`'s `PAIR_ORACLES`, which this script prints).
-/// @dev One broadcast from `DEPLOYER_ADDRESS`: one CREATE per entry, in order. Inputs, one entry per adapter:
+/// passes the addresses to `addPair` (`DeployManagedPool`'s `PAIR_ORACLES`, which `verify` prints).
+/// @dev `run` is one broadcast from `DEPLOYER_ADDRESS`: one CREATE per entry, in order. `verify` sends nothing: after
+/// inclusion it holds the mined adapters in `ORACLE_ADAPTERS` to the same inputs. Inputs, one entry per adapter:
 /// - `ORACLE_KINDS`, comma-separated: `CHAINLINK` (`ChainlinkPriceOracleAdapter`: the feed's own decimals),
 ///   `CHAINLINK_18_TO_8` (`Chainlink18To8PriceOracleAdapter`: an 18-decimal feed read at 8 decimals, rounded down) or
 ///   `ONDO_USDY` (`OndoUSDYPriceOracleAdapter`: Ondo's USDY oracle wrapper, 18 decimals);
 /// - `ORACLE_SOURCES`, comma-separated: the Chainlink AggregatorV3 feed, or Ondo's wrapper (on mainnet only
 ///   `TempoMainnet.USDY_ORACLE_WRAPPER`);
-/// - `ORACLE_SOURCE_DESCRIPTIONS`, separated by `|`: the feed's exact `description()`, reviewed with the feed's
-///   operator, or `-` for `ONDO_USDY`, whose wrapper has none;
+/// - `ORACLE_SOURCE_DESCRIPTIONS_FILE`: the path of a text file under `deployments/` with one line per adapter, in
+///   order: the feed's exact `description()`, reviewed with the feed's operator, or `-` for `ONDO_USDY`, whose
+///   wrapper has none. The file is read as data and never by a shell, so a description may hold any character
+///   except a line break;
 /// - `ORACLE_DECIMALS`, comma-separated: the `decimals()` the adapter must answer. A managed pair fixes its oracle's
 ///   decimals when it is added (`setOracle` refuses another: `OracleDecimalsChanged`), so this is the pair's price
 ///   precision for good;
@@ -32,10 +41,13 @@ import { IPriceOracle } from "../../src/interfaces/IPriceOracle.sol";
 ///   address for none. For a pair that replaces a live pool, name that pool's `oracle()`: the two must report the same
 ///   observation time and the same price at the coarser of their precisions, so the new pair starts on the price the
 ///   old pool trades at.
-/// Several entries may name one source: a pool refuses an oracle address a second pair already uses, so two pairs on
-/// one feed need an adapter each. Every check gates the broadcast, and Forge sends only with `--broadcast`.
-/// Decimals are precision, never a currency conversion: the reviewed description is what says a feed prices the
-/// pair's base in its quote.
+/// Several entries may name one source, so that two pairs on one feed get an adapter each: `DeployManagedPool`
+/// refuses an oracle address a second pair of its run names. The pool itself does not: before a later `addPair` or
+/// `setOracle`, compare the oracle with every live `pair(i).oracle`. Every check gates the broadcast, and Forge sends
+/// only with `--broadcast`. Decimals are precision, never a currency conversion: the reviewed description is what says
+/// a feed prices the pair's base in its quote.
+/// A `CHAINLINK` adapter reads its feed's decimals when its CREATE is mined, after the simulation that checked them,
+/// so `run` proves nothing about the mined adapter: `verify` does, and only it prints `PAIR_ORACLES`.
 contract DeployManagedOracleAdapters is Script {
     error UnexpectedChain(uint256 chainId);
     error InvalidConfig(string field);
@@ -73,10 +85,10 @@ contract DeployManagedOracleAdapters is Script {
     uint256 public constant MAX_ADAPTERS = 16;
     /// @notice `DeployManagedPool`'s limit on a pair's oracle age.
     uint256 public constant MAX_MAX_ORACLE_AGE = 365 days;
-    /// @dev `ORACLE_SOURCE_DESCRIPTIONS` for a source without a description.
+    /// @dev The descriptions file's line for a source without a description.
     string internal constant NO_DESCRIPTION = "-";
 
-    /// @notice Checks every input, deploys the adapters in order, checks each and logs the pool's `PAIR_ORACLES`.
+    /// @notice Checks every input, deploys the adapters in order, checks each and logs `verify`'s `ORACLE_ADAPTERS`.
     function run() public returns (address[] memory adapters) {
         if (block.chainid != TEMPO_MAINNET_CHAIN_ID && block.chainid != TEMPO_MODERATO_CHAIN_ID) {
             revert UnexpectedChain(block.chainid);
@@ -115,12 +127,45 @@ contract DeployManagedOracleAdapters is Script {
         _logDeployment(adapters, config, prices, times);
     }
 
+    /// @notice After inclusion: holds the mined adapters in `ORACLE_ADAPTERS`, in the run's order, to the run's inputs
+    /// and logs the pool's `PAIR_ORACLES`. Sends nothing.
+    /// @dev Each adapter must read the reviewed source, answer the reviewed decimals and report the observation a
+    /// fresh local probe of the same kind reports now. That compares what the adapter answers, not its code or who
+    /// deployed it: take the addresses from the deployer's own receipts.
+    function verify() public returns (address[] memory adapters) {
+        if (block.chainid != TEMPO_MAINNET_CHAIN_ID && block.chainid != TEMPO_MODERATO_CHAIN_ID) {
+            revert UnexpectedChain(block.chainid);
+        }
+        Config memory config = _readConfig();
+        uint256 count = _checkInputs(config);
+        adapters = _readAdapters();
+        if (adapters.length != count) revert InvalidConfig("ORACLE_ADAPTERS needs one entry per adapter");
+        // One check per configured adapter is the entry point's whole job; any failure stops the run.
+        // forge-lint: disable-start(calls-loop, require-revert-in-loop)
+        for (uint256 i; i < count; ++i) {
+            for (uint256 j; j < i; ++j) {
+                if (adapters[j] == adapters[i]) revert InvalidConfig(_field("ORACLE_ADAPTERS", i));
+            }
+            AdapterConfig memory a = config.adapters[i];
+            // The probe is local and never broadcast.
+            (uint256 price, uint256 updatedAt) = _checkObservation(_deploy(a), a, i);
+            _checkMined(adapters[i], a, price, updatedAt, i);
+        }
+        // forge-lint: disable-end(calls-loop, require-revert-in-loop)
+        _logVerified(adapters, config);
+    }
+
+    /// @dev Test harnesses override this to avoid process-global environment races between parallel tests.
+    function _readAdapters() internal view virtual returns (address[] memory) {
+        return vm.envAddress("ORACLE_ADAPTERS", ",");
+    }
+
     /// @dev Test harnesses override this to avoid process-global environment races between parallel tests.
     function _readConfig() internal view virtual returns (Config memory config) {
         config.deployer = vm.envAddress("DEPLOYER_ADDRESS");
         string[] memory kinds = vm.envString("ORACLE_KINDS", ",");
         address[] memory sources = vm.envAddress("ORACLE_SOURCES", ",");
-        string[] memory descriptions = vm.envString("ORACLE_SOURCE_DESCRIPTIONS", "|");
+        string[] memory descriptions = _readDescriptions(vm.envString("ORACLE_SOURCE_DESCRIPTIONS_FILE"));
         uint256[] memory decimals = vm.envUint("ORACLE_DECIMALS", ",");
         uint256[] memory ages = vm.envUint("ORACLE_MAX_AGES", ",");
         address[] memory references = vm.envAddress("ORACLE_REFERENCES", ",");
@@ -144,6 +189,24 @@ contract DeployManagedOracleAdapters is Script {
                 maxOracleAge: ages[i],
                 baseline: references[i]
             });
+        }
+    }
+
+    /// @dev One description per line, in adapter order. Forge reads the file as bytes: nothing in it is evaluated,
+    /// which a shell does to a value in a sourced env file. A final newline and carriage returns are dropped.
+    function _readDescriptions(string memory path) internal view returns (string[] memory lines) {
+        string memory text;
+        try vm.readFile(path) returns (string memory content) {
+            text = content;
+        } catch {
+            revert InvalidConfig("ORACLE_SOURCE_DESCRIPTIONS_FILE is unreadable: keep it under deployments/");
+        }
+        string[] memory parts = vm.split(vm.replace(text, "\r", ""), "\n");
+        uint256 count = parts.length;
+        if (count != 0 && bytes(parts[count - 1]).length == 0) --count;
+        lines = new string[](count);
+        for (uint256 i; i < count; ++i) {
+            lines[i] = parts[i];
         }
     }
 
@@ -191,19 +254,21 @@ contract DeployManagedOracleAdapters is Script {
             if (block.chainid == TEMPO_MAINNET_CHAIN_ID && a.source != TempoMainnet.USDY_ORACLE_WRAPPER) {
                 revert InvalidConfig(string.concat(_field("ORACLE_SOURCES", i), " is not Ondo's USDY wrapper"));
             }
-            if (described) revert InvalidConfig(string.concat(_field("ORACLE_SOURCE_DESCRIPTIONS", i), " must be -"));
+            if (described) {
+                revert InvalidConfig(string.concat(_field("ORACLE_SOURCE_DESCRIPTIONS_FILE", i), " must be -"));
+            }
             if (a.decimals != 18) revert InvalidConfig(string.concat(_field("ORACLE_DECIMALS", i), " must be 18"));
             return;
         }
         if (!described || bytes(a.description).length == 0) {
-            revert InvalidConfig(_field("ORACLE_SOURCE_DESCRIPTIONS", i));
+            revert InvalidConfig(_field("ORACLE_SOURCE_DESCRIPTIONS_FILE", i));
         }
         // The feed is operator input, so a missing or odd answer is refused by name, not with whatever it returned.
         IAggregatorV3 feed = IAggregatorV3(a.source);
         try feed.description() returns (string memory actual) {
             if (keccak256(bytes(actual)) != keccak256(bytes(a.description))) {
                 revert InvalidConfig(string.concat(
-                        _field("ORACLE_SOURCE_DESCRIPTIONS", i), ": the feed says \"", actual, "\""
+                        _field("ORACLE_SOURCE_DESCRIPTIONS_FILE", i), ": the feed says \"", actual, "\""
                     ));
             }
         } catch {
@@ -302,20 +367,41 @@ contract DeployManagedOracleAdapters is Script {
         uint256 updatedAt,
         uint256 i
     ) internal view {
+        if (adapter != predicted) {
+            // Runs once per configured entry, from a loop: any bad entry stops the whole run.
+            // forge-lint: disable-next-line(require-revert-in-loop)
+            revert UnexpectedDeploymentState(string.concat("adapter ", Strings.toString(i), " address"));
+        }
+        _checkMined(adapter, a, price, updatedAt, i);
+    }
+
+    /// @dev The adapter reads the reviewed source and answers the reviewed decimals and the probe's observation. In
+    /// `verify` the address is operator input, so every read is a raw call: a target without the function, or with
+    /// another answer shape, is refused by name. A `CHAINLINK` adapter whose feed has since changed its decimals
+    /// fails here on its observation (`FeedDecimalsChanged`).
+    function _checkMined(address adapter, AdapterConfig memory a, uint256 price, uint256 updatedAt, uint256 i)
+        internal
+        view
+    {
         // Runs once per configured entry, from a loop: any bad entry stops the whole run.
         // forge-lint: disable-start(calls-loop, require-revert-in-loop)
         string memory n = string.concat("adapter ", Strings.toString(i));
-        if (adapter != predicted || adapter.code.length == 0) {
-            revert UnexpectedDeploymentState(string.concat(n, " address"));
+        if (adapter.code.length == 0) revert UnexpectedDeploymentState(string.concat(n, " address"));
+        (bool ok, bytes memory answer) = adapter.staticcall(
+            a.kind == Kind.OndoUsdy
+                ? abi.encodeCall(IPriceAdapterSource.wrapper, ())
+                : abi.encodeCall(IPriceAdapterSource.feed, ())
+        );
+        if (!ok || answer.length != 32 || abi.decode(answer, (uint256)) != uint256(uint160(a.source))) {
+            revert UnexpectedDeploymentState(string.concat(n, " source"));
         }
-        address source = a.kind == Kind.OndoUsdy
-            ? address(OndoUSDYPriceOracleAdapter(adapter).wrapper())
-            : address(ChainlinkPriceOracleAdapter(adapter).feed());
-        if (source != a.source) revert UnexpectedDeploymentState(string.concat(n, " source"));
-        if (IPriceOracle(adapter).decimals() != a.decimals) {
+        (ok, answer) = adapter.staticcall(abi.encodeCall(IPriceOracle.decimals, ()));
+        if (!ok || answer.length != 32 || abi.decode(answer, (uint256)) != a.decimals) {
             revert UnexpectedDeploymentState(string.concat(n, " decimals"));
         }
-        (uint256 actualPrice, uint256 actualUpdatedAt) = IPriceOracle(adapter).latestPrice();
+        (ok, answer) = adapter.staticcall(abi.encodeCall(IPriceOracle.latestPrice, ()));
+        if (!ok || answer.length != 64) revert UnexpectedDeploymentState(string.concat(n, " observation"));
+        (uint256 actualPrice, uint256 actualUpdatedAt) = abi.decode(answer, (uint256, uint256));
         if (actualPrice != price || actualUpdatedAt != updatedAt) {
             revert UnexpectedDeploymentState(string.concat(n, " observation"));
         }
@@ -358,7 +444,20 @@ contract DeployManagedOracleAdapters is Script {
             list = string.concat(list, i == 0 ? "" : ",", Strings.toChecksumHexString(adapters[i]));
         }
         console2.log("Immutable and ownerless: no role, pool or token was touched.");
-        console2.log("After inclusion, read each adapter's source, decimals() and latestPrice() from the chain.");
+        console2.log("These are simulated addresses and answers. An adapter reads its feed again when it is mined:");
+        console2.log("after inclusion, run verify() with the mined addresses before DeployManagedPool, in this order:");
+        console2.log(string.concat("ORACLE_ADAPTERS=", list));
+    }
+
+    function _logVerified(address[] memory adapters, Config memory config) internal view {
+        string memory list;
+        for (uint256 i; i < adapters.length; ++i) {
+            AdapterConfig memory a = config.adapters[i];
+            console2.log(string.concat("Verified ", _kindName(a.kind), " ", Strings.toString(i)), adapters[i]);
+            console2.log("  source / decimals", a.source, a.decimals);
+            list = string.concat(list, i == 0 ? "" : ",", Strings.toChecksumHexString(adapters[i]));
+        }
+        console2.log("Each adapter reads its reviewed source at its reviewed decimals, as of block", block.number);
         console2.log("For contracts/script/managed/DeployManagedPool.s.sol, in this order:");
         console2.log(string.concat("PAIR_ORACLES=", list));
     }
