@@ -13,6 +13,7 @@ sdk/ts/.forge/
 deployments/tempo-mainnet/*.json
 !deployments/tempo-mainnet/propamm-v2.json
 !deployments/tempo-mainnet/managed-core.json
+!deployments/tempo-mainnet/price-adapters.json
 # DeployV2 dry runs record simulated addresses only.
 deployments/*/propamm-v2.dry-run.json
 

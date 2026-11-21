@@ -410,6 +410,37 @@ A maker's pool is a clone: `PoolFactory.createPool(owner, salt)` creates it paus
 `predictPool(creator, owner, salt)` returns. `DeployManagedPool.s.sol` below instead deploys a standalone pool
 with no factory, which the shared Settler does not accept.
 
+### Mainnet price adapters
+
+Two price adapters are deployed on Tempo mainnet (chain ID 4217) for a pool owner to name as a pair's oracle. Both are
+immutable and ownerless, and neither left its deployer a role. See the
+[manifest](../deployments/tempo-mainnet/price-adapters.json).
+
+| Pair base | Contract | Address | Reads | Decimals |
+| --- | --- | --- | --- | --- |
+| USDY | `OndoUSDYPriceOracleAdapter` | `0xa1e2D13c513907aaa5e771D792D908C98E146766` | Ondo's USDY wrapper `0xb25b3266467a755328cfb8F1b349319C2B94419C` | 18 |
+| PRIME | `Chainlink18To8PriceOracleAdapter` | `0x64672f045089AdDC26b2FE6e3E1D2AD4DAc91A61` | AggregatorV3 feed `0x0ae20Ebc56e1944eBaa7E40E65C8b7A61d6fF490` | 8 |
+
+The USDY adapter reads only the wrapper's `getPriceData()` price and reports the current time, so it follows Ondo's
+continuously accruing oracle and any later source Ondo puts behind the wrapper. Deployment transaction:
+[50120201](https://explore.tempo.xyz/tx/0xd469204893e2c6a50bb9161bda28769e49b1d7be791b4078c24ae7b904ba48a3), on
+2026-11-21, from `0xcC4957A13A225eA1BfC85346D48B7de2Cb2cE374` at protocol nonce 253; it used 789,817 gas and paid
+0.000474 USDC.e in fees. Source: `b6456bd58a7a06d6eafb4164b453f9e43c0c6ad9`, built with Foundry v1.8.1 and the pinned
+Solar compiler (`0.8.30+commit.d83529b.solar.0.2.0`). The deployed runtime code equals the code that commit's creation
+code returned in a simulation, `wrapper()` returns the address above, and `latestPrice()` returned the wrapper's price
+in a block after deployment. Tempo's source verifier returned
+[`exact_match`](https://contracts.tempo.xyz/verify-ui/jobs/21145c54-b0aa-4d14-a846-ea8293f4a9cd).
+
+The PRIME adapter reads an 18-decimal feed at 8 decimals, rounded down. The feed describes itself as
+`HASTRAPRIME / WYLDS Exchange Rate`: the adapter normalizes precision only, so read
+[Replace an 8-decimal pool's feed](#replace-an-8-decimal-pools-feed) before pricing a pair in another quote token.
+Deployment transaction:
+[47074189](https://explore.tempo.xyz/tx/0x9fe5a0c3a371ca915925230863c1e4a2e9877eab93034cf7d28b40d36fd6e3b0), on
+2026-11-02, from the same deployer at protocol nonce 238. It was built with solc `0.8.30+commit.73712a01`, before this
+repository moved to Solar, and Tempo's source verifier holds its source as an `exact_match`.
+
+Before naming one in `addPair`, compare its `latestPrice()` with the source it reads.
+
 ### Deploy a managed pool
 
 `contracts/script/managed/DeployManagedPool.s.sol` deploys `ManagedDirectPropAMM(OWNER_ADDRESS, address(0))` on Tempo
