@@ -1,0 +1,31 @@
+{
+  "chainId": 4217,
+  "network": "tempo-mainnet",
+  "deployer": "0xcC4957A13A225eA1BfC85346D48B7de2Cb2cE374",
+  "adapters": {
+    "prime": {
+      "address": "0x64672f045089AdDC26b2FE6e3E1D2AD4DAc91A61",
+      "compiler": "0.8.30+commit.73712a01",
+      "contract": "Chainlink18To8PriceOracleAdapter",
+      "decimals": 8,
+      "deployerNonce": 238,
+      "feed": "0x0ae20Ebc56e1944eBaa7E40E65C8b7A61d6fF490",
+      "startBlock": 47074189,
+      "status": "verified",
+      "transaction": "0x9fe5a0c3a371ca915925230863c1e4a2e9877eab93034cf7d28b40d36fd6e3b0"
+    },
+    "usdy": {
+      "address": "0xa1e2D13c513907aaa5e771D792D908C98E146766",
+      "compiler": "0.8.30+commit.d83529b.solar.0.2.0",
+      "contract": "OndoUSDYPriceOracleAdapter",
+      "creationCodeHash": "0x27e152c570476c41d975ab081e51031b169b2f1a7ae7d37c3e0cc93dbb782490",
+      "decimals": 18,
+      "deployerNonce": 253,
+      "sourceCommit": "b6456bd58a7a06d6eafb4164b453f9e43c0c6ad9",
+      "startBlock": 50120201,
+      "status": "verified",
+      "transaction": "0xd469204893e2c6a50bb9161bda28769e49b1d7be791b4078c24ae7b904ba48a3",
+      "wrapper": "0xb25b3266467a755328cfb8F1b349319C2B94419C"
+    }
+  }
+}

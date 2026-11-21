@@ -13,7 +13,7 @@ trade.
 
 ## Deployments
 
-Tempo mainnet (chain ID 4217). Every contract below has verified source; neither deployment left its deployer a role.
+Tempo mainnet (chain ID 4217). Every contract below has verified source, and no deployment left its deployer a role.
 
 | System | Contract | Address |
 | --- | --- | --- |
@@ -23,10 +23,12 @@ Tempo mainnet (chain ID 4217). Every contract below has verified source; neither
 | Managed | PoolFactory | [0x61e5C6b8B737930d07025eC88B34B307F61e162c](https://explore.tempo.xyz/address/0x61e5C6b8B737930d07025eC88B34B307F61e162c) |
 | Managed | Settler | [0xf8Ed0Ed4D960f1F400400dA717Aba69708049595](https://explore.tempo.xyz/address/0xf8Ed0Ed4D960f1F400400dA717Aba69708049595) |
 | Managed | Pool implementation | [0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b](https://explore.tempo.xyz/address/0xa12a02d2917c4EFb4d4BFAf2fCca17c7Ab55215b) |
+| Price adapter | USDY (Ondo wrapper), 18 decimals | [0xa1e2D13c513907aaa5e771D792D908C98E146766](https://explore.tempo.xyz/address/0xa1e2D13c513907aaa5e771D792D908C98E146766) |
+| Price adapter | PRIME (HASTRAPRIME / WYLDS feed), 8 decimals | [0x64672f045089AdDC26b2FE6e3E1D2AD4DAc91A61](https://explore.tempo.xyz/address/0x64672f045089AdDC26b2FE6e3E1D2AD4DAc91A61) |
 
 The two Settlers are different contracts: approve the one for the system you trade on. Records:
-[v2](docs/v2-deployment.md#mainnet-deployment) and [managed](docs/deployment.md#mainnet-core). Testnet deployments
-are in each guide.
+[v2](docs/v2-deployment.md#mainnet-deployment), [managed](docs/deployment.md#mainnet-core) and
+[price adapters](docs/deployment.md#mainnet-price-adapters). Testnet deployments are in each guide.
 
 ## Choose a contract
 
