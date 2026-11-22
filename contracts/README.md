@@ -347,7 +347,8 @@ swapExactOutput(pairIndex, baseToQuote, amountOut, maxAmountIn, sponsorId, custo
 - All four quotes check no access or pause. They are pricing calculations, not executable
   guarantees: they neither reserve inventory nor prove access, sufficient inventory or successful token transfers.
   Quote for the effective taker (the direct caller, or the immediate caller of the Settler); for the [Veda buffer](../docs/veda-integration.md),
-  that is the BoringVault, not its helper or an end user.
+  that is the BoringVault, which calls the Settler on a factory pool and the pool otherwise, not its helper or an end
+  user.
 - Before swapping, call `takerAccess(pairIndex, taker, sponsorId)` ([Access](#access)) and simulate the complete swap.
 
 ### Shared inventory
@@ -531,9 +532,11 @@ controller, `execute` the pool's `transferOwnership(newController)`, then throug
 quote-token vault that holds the pool's base token as a buffer. It holds no funds and has no pool or vault authority;
 the vault's Teller executes its calls from the BoringVault, which is the pool's allowed taker and recipient. On a
 `ManagedDirectPropAMM`, which the helper detects at construction (`managed()`), it serves one pair and one list
-(`pairIndex`, and `sponsorId`: 0 for the home list, or a sponsor that lists the vault). Generated calls bind to the
-current timestamp with zero oracle-price tolerance. The pools don't depend on Veda. See
-[Veda integration](../docs/veda-integration.md) for the permission and NAV model.
+(`pairIndex`, and `sponsorId`: 0 for the home list, or a sponsor that lists the vault). On a pool a `PoolFactory`
+created, the vault approves and swaps through the factory's default Settler (`settler()`) and remains the taker; the
+helper reverts `SettlerMismatch` once the pool selects another settler. A standalone managed pool keeps direct swaps
+on the pool. Generated calls bind to the current timestamp with zero oracle-price tolerance. The pools don't depend on
+Veda. See [Veda integration](../docs/veda-integration.md) for the permission and NAV model.
 
 ## Security controls and known limitations
 

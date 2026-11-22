@@ -80,7 +80,7 @@ the actual execution relative to those bounds. The generated swap passes zero or
 treats the quoted effective timestamp as a minimum, and uses the current transaction timestamp as its
 deadline. Consequently, the Teller must construct and execute the management calls atomically. A newer
 observation at the same price remains valid, but any price change requires a new helper quote. The
-helper cannot move funds itself. Replacing a pool, BoringVault, customer ID, or quote-tolerance policy
+helper cannot move funds itself. Replacing a pool, its Settler, BoringVault, customer ID, or quote-tolerance policy
 requires a new helper and an explicit Teller configuration change.
 
 ## Atomic rounding credit
@@ -220,7 +220,12 @@ the same readback.
 A managed pool holds many pairs. Its swaps name the pair and the list that admits the caller (`pairIndex`,
 `sponsorId`) and pay the caller, the BoringVault. The helper detects a managed pool at construction (it answers
 `pair(pairIndex)`) and encodes those swaps instead; one helper serves one pair, whose base the vault holds and whose
-quote is its asset.
+quote is its asset. On a pool a `PoolFactory` created (`pool.factory()` is nonzero) the helper settles those swaps
+through the factory's default Settler, its immutable `settler()`: the BoringVault approves the Settler, never the
+pool, and calls `Settler.swap(pool, params)` with the same amounts, limits, list, customer ID and oracle bounds. The
+Settler takes its caller as the taker, so the vault's access, fees and rounding-credit route are those of a direct
+swap. A standalone managed pool (`pool.factory()` is zero), which no Settler fills, keeps direct swaps on the pool,
+and its helper's `settler()` reads zero.
 
 #### Hook fees and vault accounting
 
@@ -264,15 +269,22 @@ remaining holders from paying another user's costs.
    (`MODE=LIST PAIR_INDEX=<pair> SPONSOR_ID=<id> ACCOUNTS=<BoringVault>`), the sponsor switched on and admitted on the
    pair.
 2. Deploy `DirectPropAMMBufferHelper(pool, BoringVault, customerId, slippageBps, pairIndex, sponsorId)` with that pair
-   and sponsor id (0 for the home list). An unknown or removed pair reverts `InvalidPair`. For a `DirectPropAMM` pass
+   and sponsor id (0 for the home list). An unknown or removed pair reverts `InvalidPair`, and a factory pool whose
+   `settler()` is not its factory's `defaultSettler()` reverts `SettlerMismatch`. For a `DirectPropAMM` pass
    0 for both; anything else reverts `PairIndexUnsupported` or `SponsorIdUnsupported`.
 3. Verify `helper.managed()`, `helper.pairIndex()` and `helper.sponsorId()`, the helper's base and quote against
    `pool.pair(pairIndex)`, and that `pool.takerAccess(pairIndex, BoringVault, sponsorId)` reads `Allowed` (1). Any
-   other value names the refusal a swap would revert with.
+   other value names the refusal a swap would revert with. On a factory pool also verify
+   `helper.settler() == factory.defaultSettler() == pool.settler()`, the Settler the BoringVault will approve; on a
+   standalone pool `helper.settler()` is zero and the vault approves the pool.
 4. The helper's quotes check no access or pause, so a refusal surfaces at the swap, with the pool's
    own error, and the Earn deposit or redemption reverts in full: a closed pair (`TakerNotAllowed`), a denial
    (`TakerDenied`), a sponsor switched off (`SponsorDisabled`) or removed from the pair (`SponsorNotAdmitted`), a
    sponsor reset (`TakerNotAllowed` until its new admin re-lists the vault). Managed pools have no taker priority-fee cap.
+   The one swap refusal the helper raises itself is a changed settler: once a factory pool's owner selects another
+   with `setSettler`, it reverts `SettlerMismatch` instead of building a swap, so deposits and redemptions that need
+   one revert in full until the owner selects the factory's default again. A redemption the vault's pathUSD already
+   covers builds no swap.
 
 ## NAV and yield reporting
 
@@ -296,8 +308,8 @@ for the engine's Accountant-rate and measured-payout checks; they do not remove 
 - Redemptions consume pathUSD from the pool and return PRIME to it.
 - The pool is permissioned inventory, not an LP vault; it must be sized for the largest supported
   atomic deposit and redemption shortfall after available BoringVault pathUSD is considered.
-- Pausing the pool or exhausting either output inventory intentionally makes the corresponding
-  synchronous Earn action revert.
+- Pausing the pool, exhausting either output inventory or, on a factory pool, selecting a settler other than the
+  helper's intentionally makes the corresponding synchronous Earn action revert.
 - A `ManagedDirectPropAMM` owner can withdraw inventory while the pool is active, with effect from
   the next swap. Keep what is left above the largest supported deposit and redemption shortfall; an
   Earn action that needs more reverts in full.
@@ -319,9 +331,10 @@ Keep the live pool paused during preparation; unpause only the fork for rehearsa
    BoringVault, and optional Queue as a single reviewed deployment.
 2. Verify every address and base-asset binding in the table above.
 3. Verify the helper's immutable pool, vault, token pair, customer ID, zero quote tolerance, and for a managed pool
-   `managed`, `pairIndex` and `sponsorId`. Require no pair hook or verify zero hook fees for the vault in both
-   directions, including policy/upgrade authority. Monitor hook selection and policy changes; the helper does
-   not enforce zero fees. Reconcile the vault's PRIME and quote balances against Accountant NAV.
+   `managed`, `pairIndex`, `sponsorId` and `settler` (on a factory pool the factory's `defaultSettler()` and the
+   pool's current `settler()`; zero on a standalone pool). Require no pair hook or verify zero hook fees for the
+   vault in both directions, including policy/upgrade authority. Monitor hook selection and policy changes; the helper
+   does not enforce zero fees. Reconcile the vault's PRIME and quote balances against Accountant NAV.
 4. Verify both Teller buffer-helper selections and the Teller's BoringVault batch-manage authority.
 5. Verify VedaEngine has only the required Teller bulk capabilities and is bound to the EarnVault.
 6. Verify the BoringVault is the pool's allowed taker and resolved recipient (on a managed pool:

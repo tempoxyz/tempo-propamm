@@ -66,6 +66,9 @@ contract VedaManagedForkTest is Test {
         vm.stopPrank();
         pool.unpause();
         helper = new DirectPropAMMBufferHelper(IDirectPropAMM(address(pool)), VAULT, CUSTOMER, 0, 0, 0);
+        // A factory pool's helper settles through the factory's default Settler, which the vault approves.
+        assertEq(helper.settler(), settler);
+        assertEq(pool.settler(), settler);
         LiveAuthority authority = LiveAuthority(LiveTeller(TELLER).authority());
         vm.startPrank(ADMIN);
         authority.setRoleCapability(254, TELLER, LiveTeller.allowBufferHelper.selector, true);
@@ -89,15 +92,52 @@ contract VedaManagedForkTest is Test {
         assertEq(IERC20(VAULT).balanceOf(address(this)), shares);
         assertGt(IERC20(BASE).balanceOf(VAULT), baseBefore);
         assertEq(IERC20(QUOTE).balanceOf(VAULT), quoteBefore);
-        assertEq(IERC20(QUOTE).allowance(VAULT, address(pool)), 0);
+        _assertNothingLeftBehind();
         uint256 before = IERC20(QUOTE).balanceOf(address(this));
         uint256 out = LiveTeller(TELLER).bulkWithdraw(QUOTE, shares, 1, address(this));
         assertEq(IERC20(QUOTE).balanceOf(address(this)) - before, out);
         assertGt(out, 9_990_000);
         assertLe(out, 10e6);
         assertEq(IERC20(VAULT).balanceOf(address(this)), 0);
-        assertEq(IERC20(BASE).allowance(VAULT, address(pool)), 0);
+        _assertNothingLeftBehind();
         assertGe(IERC20(BASE).balanceOf(VAULT), baseBefore);
+    }
+
+    /// @dev The live vault's swaps credit the vault's own route: the Settler passes its caller as the taker.
+    function test_liveVaultOwnsTheRouteCredit() public {
+        uint256 shares = LiveTeller(TELLER).bulkDeposit(QUOTE, 50_000, 1, address(this));
+        assertGt(pool.roundingCredit(pool.roundingRouteKey(0, VAULT, CUSTOMER)), 0);
+        assertEq(pool.roundingCredit(pool.roundingRouteKey(0, settler, CUSTOMER)), 0);
+        assertEq(pool.roundingCredit(pool.roundingRouteKey(0, address(helper), CUSTOMER)), 0);
+        LiveTeller(TELLER).bulkWithdraw(QUOTE, shares, 1, address(this));
+        assertEq(pool.roundingCredit(pool.roundingRouteKey(0, settler, CUSTOMER)), 0);
+        _assertNothingLeftBehind();
+    }
+
+    /// @dev Once the owner selects another settler the helper refuses to build a swap, so the Teller's deposit and a
+    /// redemption that needs a swap revert in full; selecting the factory's default again restores both.
+    function test_replacedSettlerStopsTellerSwaps() public {
+        uint256 shares = LiveTeller(TELLER).bulkDeposit(QUOTE, 10e6, 1, address(this));
+        address replacement = makeAddr("replacement settler");
+        pool.setSettler(replacement);
+        uint256 supply = IERC20(VAULT).totalSupply();
+        uint256 balance = IERC20(QUOTE).balanceOf(address(this));
+        bytes memory mismatch =
+            abi.encodeWithSelector(DirectPropAMMBufferHelper.SettlerMismatch.selector, settler, replacement);
+        vm.expectRevert(mismatch);
+        LiveTeller(TELLER).bulkDeposit(QUOTE, 10e6, 1, address(this));
+        vm.expectRevert(mismatch);
+        LiveTeller(TELLER).bulkWithdraw(QUOTE, shares, 1, address(this));
+        assertEq(IERC20(VAULT).totalSupply(), supply);
+        assertEq(IERC20(VAULT).balanceOf(address(this)), shares);
+        assertEq(IERC20(QUOTE).balanceOf(address(this)), balance);
+        assertEq(IERC20(QUOTE).allowance(VAULT, replacement), 0);
+        assertEq(IERC20(BASE).allowance(VAULT, replacement), 0);
+        _assertNothingLeftBehind();
+
+        pool.setSettler(settler);
+        assertGt(LiveTeller(TELLER).bulkWithdraw(QUOTE, shares, 1, address(this)), 9_990_000);
+        _assertNothingLeftBehind();
     }
 
     function test_pausedDepositRollsBackSharesAndTokens() public {
@@ -108,7 +148,7 @@ contract VedaManagedForkTest is Test {
         LiveTeller(TELLER).bulkDeposit(QUOTE, 10e6, 1, address(this));
         assertEq(IERC20(VAULT).totalSupply(), supply);
         assertEq(IERC20(QUOTE).balanceOf(address(this)), balance);
-        assertEq(IERC20(QUOTE).allowance(VAULT, address(pool)), 0);
+        _assertNothingLeftBehind();
     }
 
     function test_idleQuoteAvoidsSwapWhenPoolPaused() public {
@@ -131,7 +171,7 @@ contract VedaManagedForkTest is Test {
         assertGt(out, idle);
         assertEq(poolQuote - IERC20(QUOTE).balanceOf(address(pool)), out - idle);
         assertEq(IERC20(QUOTE).balanceOf(VAULT), 0);
-        assertEq(IERC20(BASE).allowance(VAULT, address(pool)), 0);
+        _assertNothingLeftBehind();
     }
 
     function test_pausedRedemptionRollsBackSharesAndTokens() public {
@@ -146,7 +186,7 @@ contract VedaManagedForkTest is Test {
         assertEq(IERC20(VAULT).balanceOf(address(this)), shares);
         assertEq(IERC20(QUOTE).balanceOf(address(this)), balance);
         assertEq(IERC20(BASE).balanceOf(VAULT), baseBalance);
-        assertEq(IERC20(BASE).allowance(VAULT, address(pool)), 0);
+        _assertNothingLeftBehind();
     }
 
     function test_unlistedVaultCannotDeposit() public {
@@ -181,5 +221,15 @@ contract VedaManagedForkTest is Test {
         assertEq(IERC20(QUOTE).balanceOf(settler), 0);
         assertEq(IERC20(BASE).balanceOf(settler), 0);
         assertEq(IERC20(QUOTE).allowance(VAULT, settler), 0);
+    }
+
+    /// @dev The vault leaves no allowance to the Settler or the pool, and the Settler holds nothing.
+    function _assertNothingLeftBehind() internal view {
+        address[2] memory tokens = [QUOTE, BASE];
+        for (uint256 i; i < tokens.length; ++i) {
+            assertEq(IERC20(tokens[i]).allowance(VAULT, settler), 0);
+            assertEq(IERC20(tokens[i]).allowance(VAULT, address(pool)), 0);
+            assertEq(IERC20(tokens[i]).balanceOf(settler), 0);
+        }
     }
 }
