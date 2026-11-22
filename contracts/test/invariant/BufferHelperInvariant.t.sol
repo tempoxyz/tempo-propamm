@@ -251,7 +251,8 @@ contract BufferHelperInvariantTest is StdInvariant, Test {
 
 /// @dev The same campaign on a factory-created `ManagedDirectPropAMM`, whose batches settle through the factory's
 /// default Settler. The handler owns the pool, so it can also replace the pool's settler and select the default again:
-/// while another settler is selected the helper must refuse to build a swap, and nothing may move.
+/// while another settler is selected the helper still builds the Settler batch, whose swap the pool must refuse
+/// (`NotSettler`), and nothing may move.
 contract SettlerBufferHelperInvariantHandler {
     uint256 internal constant MAX_AMOUNT = 10_000_000;
     bytes32 internal constant CUSTOMER_ID = keccak256("buffer-settler-stateful");
@@ -271,7 +272,7 @@ contract SettlerBufferHelperInvariantHandler {
     uint256 public completedDeposits;
     uint256 public completedWithdrawals;
     uint256 public rejectedBatches;
-    uint256 public refusedBuilds;
+    uint256 public refusedFills;
 
     constructor(
         PoolFactory factory,
@@ -307,9 +308,10 @@ contract SettlerBufferHelperInvariantHandler {
         uint256 amount = 100_000 + seed % MAX_AMOUNT;
         quoteToken.mint(address(vault), amount);
         totalDeposited += amount;
-        (bool built, address[] memory targets, bytes[] memory data, uint256[] memory values) = _build(true, amount);
-        if (!built) return;
+        (address[] memory targets, bytes[] memory data, uint256[] memory values) =
+            helper.getDepositManageCall(address(quoteToken), amount);
         _checkBatch(targets, data, values, address(quoteToken), amount);
+        bool selected = pool.settler() == settler;
 
         uint256 quotedOut;
         (quotedOut,,,) = pool.quoteExactInputFor(PAIR, address(vault), CUSTOMER_ID, false, amount);
@@ -322,22 +324,22 @@ contract SettlerBufferHelperInvariantHandler {
 
         try vault.manage(targets, data, values) {
             if (
-                interference % 4 == 0 || quoteToken.balanceOf(address(vault)) != quoteBefore - amount
+                !selected || interference % 4 == 0 || quoteToken.balanceOf(address(vault)) != quoteBefore - amount
                     || baseToken.balanceOf(address(vault)) != baseBefore + quotedOut
                     || baseToken.balanceOf(address(pool)) != poolBaseBefore - quotedOut
                     || quoteToken.balanceOf(address(pool)) != poolQuoteBefore + amount
             ) invariantBroken = true;
             ++completedDeposits;
-        } catch {
+        } catch (bytes memory reason) {
             if (
-                interference % 4 != 0 || baseToken.balanceOf(address(vault)) != baseBefore
+                (selected && interference % 4 != 0) || baseToken.balanceOf(address(vault)) != baseBefore
                     || quoteToken.balanceOf(address(vault)) != quoteBefore
                     || baseToken.balanceOf(address(pool)) != poolBaseBefore
                     || quoteToken.balanceOf(address(pool)) != poolQuoteBefore || _credit() != creditBefore
             ) {
                 invariantBroken = true;
             }
-            ++rejectedBatches;
+            _countRejection(!selected, reason);
         }
         _checkNothingLeftBehind();
         if (interference % 4 == 0) oracle.setPrice(oracle.price() - 1, block.timestamp);
@@ -360,8 +362,9 @@ contract SettlerBufferHelperInvariantHandler {
             ++completedWithdrawals;
             return;
         }
-        (bool built, address[] memory targets, bytes[] memory data, uint256[] memory values) = _build(false, amount);
-        if (!built) return;
+        (address[] memory targets, bytes[] memory data, uint256[] memory values) =
+            helper.getWithdrawManageCall(address(quoteToken), amount);
+        bool selected = pool.settler() == settler;
         uint256 shortfall = amount - existingQuote;
         (uint256 quotedBaseIn,,,) = pool.quoteExactOutputFor(PAIR, address(vault), CUSTOMER_ID, true, shortfall);
         _checkBatch(targets, data, values, address(baseToken), 0);
@@ -372,14 +375,16 @@ contract SettlerBufferHelperInvariantHandler {
 
         try vault.manage(targets, data, values) {
             if (
-                expire || quoteToken.balanceOf(address(vault)) != amount
+                !selected || expire || quoteToken.balanceOf(address(vault)) != amount
                     || baseToken.balanceOf(address(vault)) != baseBefore - quotedBaseIn
                     || quoteToken.balanceOf(address(pool)) != quotePoolBefore - shortfall
             ) invariantBroken = true;
             vault.pay(quoteToken, address(this), amount);
             ++completedWithdrawals;
-        } catch {
-            if (!expire && quotedBaseIn <= baseBefore && shortfall <= quotePoolBefore) invariantBroken = true;
+        } catch (bytes memory reason) {
+            // The Settler checks the deadline, quotes and pulls the input before the pool can refuse its fill.
+            bool fundable = !expire && quotedBaseIn <= baseBefore && shortfall <= quotePoolBefore;
+            if (selected && fundable) invariantBroken = true;
             if (
                 quoteToken.balanceOf(address(vault)) != existingQuote
                     || baseToken.balanceOf(address(vault)) != baseBefore
@@ -387,31 +392,25 @@ contract SettlerBufferHelperInvariantHandler {
             ) {
                 invariantBroken = true;
             }
-            ++rejectedBatches;
+            _countRejection(!selected && fundable, reason);
         }
         _checkNothingLeftBehind();
     }
 
-    /// @dev The helper builds a swap exactly while the pool still selects the factory's default Settler; otherwise it
-    /// reverts `SettlerMismatch`, naming both.
-    function _build(bool isDeposit, uint256 amount)
-        internal
-        returns (bool built, address[] memory targets, bytes[] memory data, uint256[] memory values)
-    {
-        bool selected = pool.settler() == settler;
-        bytes4 selector = isDeposit ? helper.getDepositManageCall.selector : helper.getWithdrawManageCall.selector;
-        bytes memory call = abi.encodeWithSelector(selector, address(quoteToken), amount);
-        bytes memory result;
-        (built, result) = address(helper).staticcall(call);
-        if (built != selected) invariantBroken = true;
-        if (built) {
-            (targets, data, values) = abi.decode(result, (address[], bytes[], uint256[]));
-        } else {
-            bytes memory mismatch =
-                abi.encodeWithSelector(DirectPropAMMBufferHelper.SettlerMismatch.selector, settler, replacement);
-            if (keccak256(result) != keccak256(mismatch)) invariantBroken = true;
-            ++refusedBuilds;
+    /// @dev A batch whose swap reaches the pool while it selects another settler (`refused`) must fail there, at the
+    /// third call, with the pool's `NotSettler`: the fill the pool no longer takes from the factory's default Settler.
+    function _countRejection(bool refused, bytes memory reason) internal {
+        if (!refused) {
+            ++rejectedBatches;
+            return;
         }
+        bytes memory notSettler = abi.encodeWithSelector(
+            BufferInvariantVault.ManageCallFailed.selector,
+            2,
+            abi.encodeWithSelector(IManagedDirectPropAMM.NotSettler.selector)
+        );
+        if (keccak256(reason) != keccak256(notSettler)) invariantBroken = true;
+        ++refusedFills;
     }
 
     /// @dev Approvals name the Settler, never the pool; `approved` is the exact approval, or 0 to skip that check.
@@ -448,6 +447,11 @@ contract SettlerBufferHelperInvariantHandler {
                 || baseToken.allowance(address(vault), address(pool)) != 0
                 || quoteToken.allowance(address(vault), address(pool)) != 0 || baseToken.balanceOf(settler) != 0
                 || quoteToken.balanceOf(settler) != 0
+        ) invariantBroken = true;
+        if (
+            baseToken.allowance(address(vault), replacement) != 0
+                || quoteToken.allowance(address(vault), replacement) != 0 || baseToken.balanceOf(replacement) != 0
+                || quoteToken.balanceOf(replacement) != 0
         ) invariantBroken = true;
     }
 
@@ -530,7 +534,8 @@ contract SettlerBufferHelperInvariantTest is StdInvariant, Test {
         handler.selectSettler(0);
         handler.deposit(5_000_000, 1);
         handler.withdraw(8_000_000, 500_000, false);
-        assertEq(handler.refusedBuilds(), 2);
+        assertEq(handler.refusedFills(), 2);
+        assertEq(handler.rejectedBatches(), 1);
         handler.selectSettler(1);
         handler.withdraw(8_000_000, 500_000, false);
         assertEq(handler.completedWithdrawals(), 1);

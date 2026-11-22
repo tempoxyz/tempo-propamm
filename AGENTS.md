@@ -82,7 +82,8 @@ pool fills; a router calls it as the taker rather than forwarding an underlying 
 - The buffer helper quotes managed pools for the BoringVault, the actual swap caller: of the pool on a standalone
   managed pool, and of the factory's default Settler on a factory-created one, where the vault approves the Settler,
   never the pool. The helper's immutable `settler` is `factory.defaultSettler()`, zero for a `DirectPropAMM` or a
-  standalone pool, and must equal `pool.settler()` at construction and whenever a swap is built (`SettlerMismatch`).
+  standalone pool, and is never compared with `pool.settler()`: after the owner's `setSettler` the helper still builds
+  the Settler batch, whose swap reverts with the pool's `NotSettler`, and nothing moves.
   The Settler swap carries the direct call's amounts, limits, list, customer ID, trade ID, deadline and oracle bounds,
   and the vault stays the taker, so access and the `(pairIndex, vault, customerId)` credit route are unchanged
   (`FactoryPoolBufferHelperTest` runs both paths side by side). Earn production requires

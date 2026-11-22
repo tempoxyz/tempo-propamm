@@ -995,56 +995,96 @@ contract FactoryPoolBufferHelperTest is Test {
         _assertNothingLeftBehind();
     }
 
-    /// @dev After the owner's `setSettler` both builders revert, so the vault never approves or calls a Settler the
-    /// helper was not built for; a batch built before the change fails at the swap with nothing moved. A redemption the
-    /// vault's own inventory covers builds no swap and still returns no calls. Selecting the default again restores it.
-    function test_aReplacedSettlerStopsBothBuilders() external {
+    /// @dev After the owner's `setSettler` both builders still return the Settler batch, naming the factory's default
+    /// and never the replacement. The pool refuses that Settler's fill (`NotSettler`), so the vault's batch reverts as
+    /// a whole with every balance, allowance and route credit unchanged. A redemption the vault's own inventory covers
+    /// still returns no calls. Selecting the default again restores both swaps.
+    function test_aReplacedSettlerRevertsTheSwapWithNothingMoved() external {
         DirectPropAMMBufferHelper helper = _helper(pool, vault, PARTNER);
         pathUsd.mint(address(vault), 105 * UNIT);
         prime.mint(address(vault), 100 * UNIT);
         (address[] memory targets, bytes[] memory data, uint256[] memory values) =
             helper.getDepositManageCall(address(pathUsd), 105 * UNIT);
+        bytes memory depositBatch = abi.encode(targets, data, values);
 
         pool.setSettler(replacement);
-        bytes memory mismatch =
-            abi.encodeWithSelector(DirectPropAMMBufferHelper.SettlerMismatch.selector, settler, replacement);
-        vm.expectRevert(mismatch);
-        helper.getDepositManageCall(address(pathUsd), 105 * UNIT);
-        vm.expectRevert(mismatch);
-        helper.getWithdrawManageCall(address(pathUsd), 126 * UNIT);
+        assertEq(helper.settler(), settler);
+        uint256[5] memory held = _holdings();
+        (targets, data, values) = helper.getDepositManageCall(address(pathUsd), 105 * UNIT);
+        assertEq(
+            abi.encode(targets, data, values), depositBatch, "the deposit batch does not follow the pool's settler"
+        );
+        assertEq(targets[2], settler);
+        assertEq(data[1], abi.encodeCall(IERC20.approve, (settler, 105 * UNIT)));
 
         bytes memory poolReason = abi.encodeWithSelector(IManagedDirectPropAMM.NotSettler.selector);
         vm.expectRevert(abi.encodeWithSelector(MockBoringVault.ManageCallFailed.selector, 2, poolReason));
         vault.manage(targets, data, values);
-        assertEq(pathUsd.balanceOf(address(vault)), 105 * UNIT);
-        assertEq(prime.balanceOf(address(vault)), 100 * UNIT);
-        _assertNothingLeftBehind();
-        assertEq(pathUsd.allowance(address(vault), replacement), 0);
+        _assertNothingMoved(held);
+
+        // A redemption of 126 pathUSD from a vault holding 105: the shortfall's batch is the Settler's too.
+        (targets, data, values) = helper.getWithdrawManageCall(address(pathUsd), 126 * UNIT);
+        (uint256 quoted, uint256 price, uint256 updatedAt) =
+            pool.quoteExactOutput(PAIR, address(vault), true, 21 * UNIT);
+        IManagedDirectPropAMM.SwapParams memory params = IManagedDirectPropAMM.SwapParams({
+            pairIndex: PAIR,
+            baseToQuote: true,
+            exactInput: false,
+            amount: 21 * UNIT,
+            limit: (quoted * 10_050 + 9_999) / 10_000,
+            sponsorId: PARTNER,
+            customerId: CUSTOMER_ID,
+            tradeId: _tradeId("DIRECT_PROP_VEDA_WITHDRAW", 21 * UNIT),
+            deadline: block.timestamp,
+            expectedOraclePrice: price,
+            oraclePriceToleranceBps: 0,
+            minimumOracleUpdatedAt: updatedAt
+        });
+        assertEq(abi.encode(targets, data, values), _settlerBatch(address(prime), params.limit, params));
+        vm.expectRevert(abi.encodeWithSelector(MockBoringVault.ManageCallFailed.selector, 2, poolReason));
+        vault.manage(targets, data, values);
+        _assertNothingMoved(held);
 
         (address[] memory none,,) = helper.getWithdrawManageCall(address(pathUsd), 105 * UNIT);
         assertEq(none.length, 0, "existing quote inventory needs no swap");
 
         pool.setSettler(settler);
         vault.manage(targets, data, values);
-        assertEq(prime.balanceOf(address(vault)), 200 * UNIT);
-        (targets, data, values) = helper.getWithdrawManageCall(address(pathUsd), 21 * UNIT);
+        assertEq(pathUsd.balanceOf(address(vault)), 126 * UNIT);
+        assertEq(prime.balanceOf(address(vault)), 80 * UNIT);
+        (targets, data, values) = helper.getDepositManageCall(address(pathUsd), 105 * UNIT);
         vault.manage(targets, data, values);
         assertEq(pathUsd.balanceOf(address(vault)), 21 * UNIT);
         assertEq(prime.balanceOf(address(vault)), 180 * UNIT);
         _assertNothingLeftBehind();
     }
 
-    /// @dev A factory pool whose owner selected another settler has no helper: the vault would approve a contract the
-    /// factory did not deploy.
-    function test_constructionRejectsAFactoryPoolOffItsDefaultSettler() external {
+    /// @dev A helper built on a factory pool whose owner already selected another settler still names the factory's
+    /// default, never the replacement: its batch reverts at the swap with the pool's `NotSettler` and nothing moved,
+    /// and settles once the owner selects the default again.
+    function test_constructionOnAReplacedSettlerKeepsTheFactoryDefault() external {
         pool.setSettler(replacement);
-        vm.expectRevert(
-            abi.encodeWithSelector(DirectPropAMMBufferHelper.SettlerMismatch.selector, settler, replacement)
-        );
-        new DirectPropAMMBufferHelper(IDirectPropAMM(address(pool)), address(vault), CUSTOMER_ID, 50, PAIR, PARTNER);
+        DirectPropAMMBufferHelper helper = _helper(pool, vault, PARTNER);
+        assertEq(helper.settler(), settler);
+        assertEq(helper.settler(), factory.defaultSettler());
+        assertEq(pool.settler(), replacement);
+
+        pathUsd.mint(address(vault), 105 * UNIT);
+        uint256[5] memory held = _holdings();
+        (address[] memory targets, bytes[] memory data, uint256[] memory values) =
+            helper.getDepositManageCall(address(pathUsd), 105 * UNIT);
+        assertEq(targets[2], settler);
+        assertEq(data[1], abi.encodeCall(IERC20.approve, (settler, 105 * UNIT)));
+        bytes memory poolReason = abi.encodeWithSelector(IManagedDirectPropAMM.NotSettler.selector);
+        vm.expectRevert(abi.encodeWithSelector(MockBoringVault.ManageCallFailed.selector, 2, poolReason));
+        vault.manage(targets, data, values);
+        _assertNothingMoved(held);
 
         pool.setSettler(settler);
-        assertEq(_helper(pool, vault, PARTNER).settler(), settler);
+        vault.manage(targets, data, values);
+        assertEq(pathUsd.balanceOf(address(vault)), 0);
+        assertEq(prime.balanceOf(address(vault)), 100 * UNIT);
+        _assertNothingLeftBehind();
     }
 
     /// @dev The Settler's swap keeps the direct call's deadline (the construction block's timestamp) and its binding
@@ -1113,6 +1153,30 @@ contract FactoryPoolBufferHelperTest is Test {
             assertEq(tokens[i].allowance(address(vault), settler), 0);
             assertEq(tokens[i].allowance(address(vault), address(pool)), 0);
             assertEq(tokens[i].balanceOf(settler), 0);
+        }
+    }
+
+    /// @dev The vault's and the pool's balances of both pair tokens, and the vault's route credit.
+    function _holdings() internal view returns (uint256[5] memory held) {
+        held[0] = prime.balanceOf(address(vault));
+        held[1] = pathUsd.balanceOf(address(vault));
+        held[2] = prime.balanceOf(address(pool));
+        held[3] = pathUsd.balanceOf(address(pool));
+        held[4] = pool.roundingCredit(pool.roundingRouteKey(PAIR, address(vault), CUSTOMER_ID));
+    }
+
+    /// @dev Balances and route credit as `held`, no allowance from the vault to the Settler, the pool or the
+    /// replacement settler, and nothing on either settler.
+    function _assertNothingMoved(uint256[5] memory held) internal view {
+        uint256[5] memory current = _holdings();
+        for (uint256 i; i < held.length; ++i) {
+            assertEq(current[i], held[i]);
+        }
+        _assertNothingLeftBehind();
+        MockTIP20[3] memory tokens = [prime, pathUsd, other];
+        for (uint256 i; i < tokens.length; ++i) {
+            assertEq(tokens[i].allowance(address(vault), replacement), 0);
+            assertEq(tokens[i].balanceOf(replacement), 0);
         }
     }
 

@@ -33,7 +33,6 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
     error InvalidAddress();
     error InvalidPair();
     error PairIndexUnsupported(uint16 pairIndex);
-    error SettlerMismatch(address expected, address actual);
     error SlippageTooHigh(uint256 supplied, uint256 maximum);
     error SponsorIdUnsupported(uint64 sponsorId);
     error UnsupportedAsset(address asset);
@@ -52,9 +51,9 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
     /// otherwise.
     uint64 public immutable sponsorId;
     /// @notice The Settler the vault approves and swaps through on a factory-created `ManagedDirectPropAMM`: its
-    /// factory's default, which must be the pool's own settler at construction and whenever a swap is built
-    /// (`SettlerMismatch` otherwise). Zero for a `DirectPropAMM` and for a standalone managed pool, whose swaps the
-    /// vault calls on the pool itself.
+    /// factory's default, read once at construction and never compared with the pool's own settler. After the owner's
+    /// `setSettler` the pool refuses this Settler's fills (`NotSettler`), so the batch reverts with nothing moved.
+    /// Zero for a `DirectPropAMM` and for a standalone managed pool, whose swaps the vault calls on the pool itself.
     address public immutable settler;
 
     /// @param pairIndex_ For a `ManagedDirectPropAMM`, the live pair whose base the vault holds and whose quote is its
@@ -95,11 +94,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         address settler_ = address(0);
         if (managed_) {
             address factory = IManagedDirectPropAMM(address(pool_)).factory();
-            if (factory != address(0)) {
-                settler_ = IPoolFactory(factory).defaultSettler();
-                address poolSettler = IManagedDirectPropAMM(address(pool_)).settler();
-                if (settler_ == address(0) || poolSettler != settler_) revert SettlerMismatch(settler_, poolSettler);
-            }
+            if (factory != address(0)) settler_ = IPoolFactory(factory).defaultSettler();
         }
 
         pool = pool_;
@@ -251,13 +246,9 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
     }
 
     /// @dev The account the vault approves and calls for a swap: the pool itself, or for a factory pool `settler`,
-    ///      which must still be the pool's own. After the owner's `setSettler` the pool refuses this Settler's fills,
-    ///      and the helper never points the vault's approval at a replacement it was not built for.
+    ///      whichever settler the pool now selects. The vault's approval only ever names that fixed Settler.
     function _swapTarget() internal view returns (address) {
-        if (settler == address(0)) return address(pool);
-        address poolSettler = IManagedDirectPropAMM(address(pool)).settler();
-        if (poolSettler != settler) revert SettlerMismatch(settler, poolSettler);
-        return settler;
+        return settler == address(0) ? address(pool) : settler;
     }
 
     /// @dev The Settler call for the swap a direct managed call would make, field for field: `limit` is the minimum

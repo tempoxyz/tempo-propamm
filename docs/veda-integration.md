@@ -269,22 +269,24 @@ remaining holders from paying another user's costs.
    (`MODE=LIST PAIR_INDEX=<pair> SPONSOR_ID=<id> ACCOUNTS=<BoringVault>`), the sponsor switched on and admitted on the
    pair.
 2. Deploy `DirectPropAMMBufferHelper(pool, BoringVault, customerId, slippageBps, pairIndex, sponsorId)` with that pair
-   and sponsor id (0 for the home list). An unknown or removed pair reverts `InvalidPair`, and a factory pool whose
-   `settler()` is not its factory's `defaultSettler()` reverts `SettlerMismatch`. For a `DirectPropAMM` pass
-   0 for both; anything else reverts `PairIndexUnsupported` or `SponsorIdUnsupported`.
+   and sponsor id (0 for the home list). An unknown or removed pair reverts `InvalidPair`; a factory pool whose
+   `settler()` is not its factory's `defaultSettler()` still deploys, with the factory's default as the helper's
+   `settler()`. For a `DirectPropAMM` pass 0 for both; anything else reverts `PairIndexUnsupported` or
+   `SponsorIdUnsupported`.
 3. Verify `helper.managed()`, `helper.pairIndex()` and `helper.sponsorId()`, the helper's base and quote against
    `pool.pair(pairIndex)`, and that `pool.takerAccess(pairIndex, BoringVault, sponsorId)` reads `Allowed` (1). Any
    other value names the refusal a swap would revert with. On a factory pool also verify
-   `helper.settler() == factory.defaultSettler() == pool.settler()`, the Settler the BoringVault will approve; on a
-   standalone pool `helper.settler()` is zero and the vault approves the pool.
+   `helper.settler() == factory.defaultSettler() == pool.settler()`, the Settler the BoringVault will approve (the
+   helper does not read `pool.settler()`; while it differs, every swap reverts `NotSettler`); on a standalone pool
+   `helper.settler()` is zero and the vault approves the pool.
 4. The helper's quotes check no access or pause, so a refusal surfaces at the swap, with the pool's
    own error, and the Earn deposit or redemption reverts in full: a closed pair (`TakerNotAllowed`), a denial
    (`TakerDenied`), a sponsor switched off (`SponsorDisabled`) or removed from the pair (`SponsorNotAdmitted`), a
    sponsor reset (`TakerNotAllowed` until its new admin re-lists the vault). Managed pools have no taker priority-fee cap.
-   The one swap refusal the helper raises itself is a changed settler: once a factory pool's owner selects another
-   with `setSettler`, it reverts `SettlerMismatch` instead of building a swap, so deposits and redemptions that need
-   one revert in full until the owner selects the factory's default again. A redemption the vault's pathUSD already
-   covers builds no swap.
+   A changed settler surfaces the same way: once a factory pool's owner selects another with `setSettler`, the helper
+   still builds the Settler batch, the pool refuses that Settler's fill (`NotSettler`) and nothing moves, so deposits
+   and redemptions that need a swap revert in full until the owner selects the factory's default again. A redemption
+   the vault's pathUSD already covers builds no swap.
 
 ## NAV and yield reporting
 
