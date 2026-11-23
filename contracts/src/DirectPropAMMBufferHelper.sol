@@ -116,7 +116,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         returns (address[] memory targets, bytes[] memory data, uint256[] memory values)
     {
         _validate(asset, amount);
-        address swapTarget = _swapTarget();
+        address swapTarget = settler == address(0) ? address(pool) : settler;
 
         (uint256 quotedBaseOut, uint256 oraclePrice, uint256 oracleUpdatedAt) = managed
             ? IManagedDirectPropAMM(address(pool)).quoteExactInput(pairIndex, vault, false, amount)
@@ -132,7 +132,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         targets[1] = quoteToken;
         data[1] = abi.encodeCall(IERC20.approve, (swapTarget, amount));
         targets[2] = swapTarget;
-        if (swapTarget != address(pool)) {
+        if (settler != address(0)) {
             data[2] = _settlerSwap(
                 false, true, amount, minimumBaseOut, _tradeId(_DEPOSIT, amount), oraclePrice, oracleUpdatedAt
             );
@@ -187,7 +187,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
             return (new address[](0), new bytes[](0), new uint256[](0));
         }
 
-        address swapTarget = _swapTarget();
+        address swapTarget = settler == address(0) ? address(pool) : settler;
         uint256 shortfall = amount - quoteBalance;
         (uint256 quotedBaseIn, uint256 oraclePrice, uint256 oracleUpdatedAt) = managed
             ? IManagedDirectPropAMM(address(pool)).quoteExactOutput(pairIndex, vault, true, shortfall)
@@ -203,7 +203,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         targets[1] = baseToken;
         data[1] = abi.encodeCall(IERC20.approve, (swapTarget, maximumBaseIn));
         targets[2] = swapTarget;
-        if (swapTarget != address(pool)) {
+        if (settler != address(0)) {
             data[2] = _settlerSwap(
                 true, false, shortfall, maximumBaseIn, _tradeId(_WITHDRAW, shortfall), oraclePrice, oracleUpdatedAt
             );
@@ -243,12 +243,6 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         }
         targets[3] = baseToken;
         data[3] = abi.encodeCall(IERC20.approve, (swapTarget, 0));
-    }
-
-    /// @dev The account the vault approves and calls for a swap: the pool itself, or for a factory pool `settler`,
-    ///      whichever settler the pool now selects. The vault's approval only ever names that fixed Settler.
-    function _swapTarget() internal view returns (address) {
-        return settler == address(0) ? address(pool) : settler;
     }
 
     /// @dev The Settler call for the swap a direct managed call would make, field for field: `limit` is the minimum
