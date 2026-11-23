@@ -121,6 +121,11 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         (uint256 quotedBaseOut, uint256 oraclePrice, uint256 oracleUpdatedAt) = managed
             ? IManagedDirectPropAMM(address(pool)).quoteExactInput(pairIndex, vault, false, amount)
             : pool.quoteExactInput(false, amount);
+        if (settler != address(0)) {
+            // Check the same quote a withdrawal of this deposit would need from an empty quote buffer.
+            // Only the owner may recover a stale exit anchor. A deposit must never advance it.
+            IManagedDirectPropAMM(address(pool)).quoteExactOutput(pairIndex, vault, true, amount);
+        }
         uint256 minimumBaseOut = Math.mulDiv(quotedBaseOut, BPS - slippageBps, BPS);
 
         targets = new address[](4);

@@ -188,6 +188,26 @@ contract VedaManagedForkTest is Test {
         _assertNothingLeftBehind();
     }
 
+    function test_redemptionPriceGuardRollsBackTellerDeposit() public {
+        MockOracle oracle = MockOracle(address(pool.pair(0).oracle));
+        oracle.setPrice(1_110_000, block.timestamp);
+        uint256 shares = LiveTeller(TELLER).bulkDeposit(QUOTE, 10e6, 1, address(this));
+        assertGt(shares, 0);
+        oracle.setPrice(1_180_000, block.timestamp);
+        pool.quoteExactInput(0, VAULT, false, 10e6);
+
+        uint256 supply = IERC20(VAULT).totalSupply();
+        uint256 quote = IERC20(QUOTE).balanceOf(address(this));
+        vm.expectRevert(abi.encodeWithSelector(IM.PriceDeviationExceeded.selector, true, 1_180_000, 1_050_000, 1000));
+        LiveTeller(TELLER).bulkDeposit(QUOTE, 10e6, 1, address(this));
+        assertEq(IERC20(VAULT).totalSupply(), supply);
+        assertEq(IERC20(QUOTE).balanceOf(address(this)), quote);
+        _assertNothingLeftBehind();
+
+        pool.refreshPriceAnchor(0, true, 1_180_000, 0);
+        assertGt(LiveTeller(TELLER).bulkWithdraw(QUOTE, shares, 1, address(this)), 0);
+    }
+
     function test_idleQuoteAvoidsSwapWhenPoolPaused() public {
         uint256 shares = LiveTeller(TELLER).bulkDeposit(QUOTE, 10e6, 1, address(this));
         IERC20(QUOTE).transfer(VAULT, 10e6);
