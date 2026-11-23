@@ -79,7 +79,14 @@ pool fills; a router calls it as the taker rather than forwarding an underlying 
   `DirectPropAMM` pricing/error differentials and the v2 access differential. `DirectPropAMM` and v2 are unchanged.
   This rework is the core Sigma Prime audited at `0569025` and needs a new immutable deployment; historical demos do
   not implement it. Any change to the audited managed sources needs a new review.
-- The buffer helper quotes managed pools for the BoringVault, the actual swap caller. Earn production requires
+- The buffer helper quotes managed pools for the BoringVault, the actual swap caller: of the pool on a standalone
+  managed pool, and of the factory's default Settler on a factory-created one, where the vault approves the Settler,
+  never the pool. The helper's immutable `settler` is `factory.defaultSettler()`, zero for a `DirectPropAMM` or a
+  standalone pool, and is never compared with `pool.settler()`: after the owner's `setSettler` the helper still builds
+  the Settler batch, whose swap reverts with the pool's `NotSettler`, and nothing moves.
+  The Settler swap carries the direct call's amounts, limits, list, customer ID, trade ID, deadline and oracle bounds,
+  and the vault stays the taker, so access and the `(pairIndex, vault, customerId)` credit route are unchanged
+  (`FactoryPoolBufferHelperTest` runs both paths side by side). Earn production requires
   no hook or a verified zero vault fee in both directions, plus Accountant NAV reconciliation. The helper has
   no independent fee cap, and neither hook nor pool updates Accountant NAV. Review hook policy and upgrade
   authority, not just its current quote, before relying on zero fees.
@@ -107,7 +114,7 @@ pool fills; a router calls it as the taker rather than forwarding an underlying 
   already held by the BoringVault. If existing inventory covers the redemption, it must return an
   empty management batch.
 - Preserve quote limits, deadlines, oracle-observation binding, route-credit isolation, and cleared
-  token allowances when changing buffer behavior.
+  token allowances (to the pool, or to the Settler on a factory pool) when changing buffer behavior.
 - The propAMM oracle does not update Veda Accountant NAV. Any integrated deployment must reconcile
   PRIME and quote inventory against the Accountant valuation boundary.
 - Treat Earn and Veda as external integration context. Do not modify private or test-only

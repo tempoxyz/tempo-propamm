@@ -6,6 +6,8 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { IDirectPropAMM } from "./interfaces/IDirectPropAMM.sol";
 import { IManagedDirectPropAMM } from "./managed/interfaces/IManagedDirectPropAMM.sol";
+import { IPoolFactory } from "./managed/interfaces/IPoolFactory.sol";
+import { ISettler } from "./managed/interfaces/ISettler.sol";
 import { IVedaBufferHelper } from "./interfaces/IVedaBufferHelper.sol";
 
 /// @notice Builds Veda BoringVault management calls for a quote-token vault invested in the pool's base token.
@@ -15,7 +17,10 @@ import { IVedaBufferHelper } from "./interfaces/IVedaBufferHelper.sol";
 ///      `ManagedDirectPropAMM` swap pays its caller, which is the vault, on the pair `pairIndex` names, under the list
 ///      `sponsorId` names (0 for the pair's home list, else a sponsor's list the vault is on). Managed quotes use
 ///      `vault` as the taker, never this helper or its caller. Slippage bounds use those fee-inclusive quotes;
-///      this helper does not enforce an independent cap on the vault's configured swap fees.
+///      this helper does not enforce an independent cap on the vault's configured swap fees. On a managed pool a
+///      factory created, the vault approves and calls `settler`, its factory's default Settler, instead of the
+///      pool: the Settler takes its caller, the vault, as the taker, so access, fees and the rounding-credit route
+///      are the direct swap's. A standalone managed pool, which no Settler fills, keeps direct swaps.
 contract DirectPropAMMBufferHelper is IVedaBufferHelper {
     uint256 public constant BPS = 10_000;
     uint256 public constant MAX_SLIPPAGE_BPS = 1_000;
@@ -45,6 +50,11 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
     /// @notice The list the vault trades under on a `ManagedDirectPropAMM` (0: the pair's home list). Always 0
     /// otherwise.
     uint64 public immutable sponsorId;
+    /// @notice The Settler the vault approves and swaps through on a factory-created `ManagedDirectPropAMM`: its
+    /// factory's default, read once at construction and never compared with the pool's own settler. After the owner's
+    /// `setSettler` the pool refuses this Settler's fills (`NotSettler`), so the batch reverts with nothing moved.
+    /// Zero for a `DirectPropAMM` and for a standalone managed pool, whose swaps the vault calls on the pool itself.
+    address public immutable settler;
 
     /// @param pairIndex_ For a `ManagedDirectPropAMM`, the live pair whose base the vault holds and whose quote is its
     ///        asset (`InvalidPair` otherwise). Must be 0 for a `DirectPropAMM` (`PairIndexUnsupported`).
@@ -80,6 +90,13 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         // A removed or unknown Managed pair reads all zero.
         if (baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_) revert InvalidPair();
 
+        // Only a factory's pools have a Settler that fills them; a standalone managed pool reads a zero factory.
+        address settler_ = address(0);
+        if (managed_) {
+            address factory = IManagedDirectPropAMM(address(pool_)).factory();
+            if (factory != address(0)) settler_ = IPoolFactory(factory).defaultSettler();
+        }
+
         pool = pool_;
         vault = vault_;
         managed = managed_;
@@ -89,6 +106,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         quoteToken = quoteToken_;
         customerId = customerId_;
         slippageBps = slippageBps_;
+        settler = settler_;
     }
 
     /// @notice Converts all newly deposited quote token into the pool's base token.
@@ -98,6 +116,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         returns (address[] memory targets, bytes[] memory data, uint256[] memory values)
     {
         _validate(asset, amount);
+        address swapTarget = settler == address(0) ? address(pool) : settler;
 
         (uint256 quotedBaseOut, uint256 oraclePrice, uint256 oracleUpdatedAt) = managed
             ? IManagedDirectPropAMM(address(pool)).quoteExactInput(pairIndex, vault, false, amount)
@@ -109,44 +128,50 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         values = new uint256[](4);
 
         targets[0] = quoteToken;
-        data[0] = abi.encodeCall(IERC20.approve, (address(pool), 0));
+        data[0] = abi.encodeCall(IERC20.approve, (swapTarget, 0));
         targets[1] = quoteToken;
-        data[1] = abi.encodeCall(IERC20.approve, (address(pool), amount));
-        targets[2] = address(pool);
-        data[2] = managed
-            ? abi.encodeCall(
-                IManagedDirectPropAMM.swapExactInput,
-                (
-                    pairIndex,
-                    false,
-                    amount,
-                    minimumBaseOut,
-                    sponsorId,
-                    customerId,
-                    _tradeId(_DEPOSIT, amount),
-                    block.timestamp,
-                    oraclePrice,
-                    0,
-                    oracleUpdatedAt
-                )
-            )
-            : abi.encodeCall(
-                IDirectPropAMM.swapExactInput,
-                (
-                    false,
-                    amount,
-                    minimumBaseOut,
-                    vault,
-                    customerId,
-                    _tradeId(_DEPOSIT, amount),
-                    block.timestamp,
-                    oraclePrice,
-                    0,
-                    oracleUpdatedAt
-                )
+        data[1] = abi.encodeCall(IERC20.approve, (swapTarget, amount));
+        targets[2] = swapTarget;
+        if (settler != address(0)) {
+            data[2] = _settlerSwap(
+                false, true, amount, minimumBaseOut, _tradeId(_DEPOSIT, amount), oraclePrice, oracleUpdatedAt
             );
+        } else {
+            data[2] = managed
+                ? abi.encodeCall(
+                    IManagedDirectPropAMM.swapExactInput,
+                    (
+                        pairIndex,
+                        false,
+                        amount,
+                        minimumBaseOut,
+                        sponsorId,
+                        customerId,
+                        _tradeId(_DEPOSIT, amount),
+                        block.timestamp,
+                        oraclePrice,
+                        0,
+                        oracleUpdatedAt
+                    )
+                )
+                : abi.encodeCall(
+                    IDirectPropAMM.swapExactInput,
+                    (
+                        false,
+                        amount,
+                        minimumBaseOut,
+                        vault,
+                        customerId,
+                        _tradeId(_DEPOSIT, amount),
+                        block.timestamp,
+                        oraclePrice,
+                        0,
+                        oracleUpdatedAt
+                    )
+                );
+        }
         targets[3] = quoteToken;
-        data[3] = abi.encodeCall(IERC20.approve, (address(pool), 0));
+        data[3] = abi.encodeCall(IERC20.approve, (swapTarget, 0));
     }
 
     /// @notice Sells only enough base token to cover the vault's quote-token redemption shortfall.
@@ -162,6 +187,7 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
             return (new address[](0), new bytes[](0), new uint256[](0));
         }
 
+        address swapTarget = settler == address(0) ? address(pool) : settler;
         uint256 shortfall = amount - quoteBalance;
         (uint256 quotedBaseIn, uint256 oraclePrice, uint256 oracleUpdatedAt) = managed
             ? IManagedDirectPropAMM(address(pool)).quoteExactOutput(pairIndex, vault, true, shortfall)
@@ -173,44 +199,83 @@ contract DirectPropAMMBufferHelper is IVedaBufferHelper {
         values = new uint256[](4);
 
         targets[0] = baseToken;
-        data[0] = abi.encodeCall(IERC20.approve, (address(pool), 0));
+        data[0] = abi.encodeCall(IERC20.approve, (swapTarget, 0));
         targets[1] = baseToken;
-        data[1] = abi.encodeCall(IERC20.approve, (address(pool), maximumBaseIn));
-        targets[2] = address(pool);
-        data[2] = managed
-            ? abi.encodeCall(
-                IManagedDirectPropAMM.swapExactOutput,
-                (
-                    pairIndex,
-                    true,
-                    shortfall,
-                    maximumBaseIn,
-                    sponsorId,
-                    customerId,
-                    _tradeId(_WITHDRAW, shortfall),
-                    block.timestamp,
-                    oraclePrice,
-                    0,
-                    oracleUpdatedAt
-                )
-            )
-            : abi.encodeCall(
-                IDirectPropAMM.swapExactOutput,
-                (
-                    true,
-                    shortfall,
-                    maximumBaseIn,
-                    vault,
-                    customerId,
-                    _tradeId(_WITHDRAW, shortfall),
-                    block.timestamp,
-                    oraclePrice,
-                    0,
-                    oracleUpdatedAt
-                )
+        data[1] = abi.encodeCall(IERC20.approve, (swapTarget, maximumBaseIn));
+        targets[2] = swapTarget;
+        if (settler != address(0)) {
+            data[2] = _settlerSwap(
+                true, false, shortfall, maximumBaseIn, _tradeId(_WITHDRAW, shortfall), oraclePrice, oracleUpdatedAt
             );
+        } else {
+            data[2] = managed
+                ? abi.encodeCall(
+                    IManagedDirectPropAMM.swapExactOutput,
+                    (
+                        pairIndex,
+                        true,
+                        shortfall,
+                        maximumBaseIn,
+                        sponsorId,
+                        customerId,
+                        _tradeId(_WITHDRAW, shortfall),
+                        block.timestamp,
+                        oraclePrice,
+                        0,
+                        oracleUpdatedAt
+                    )
+                )
+                : abi.encodeCall(
+                    IDirectPropAMM.swapExactOutput,
+                    (
+                        true,
+                        shortfall,
+                        maximumBaseIn,
+                        vault,
+                        customerId,
+                        _tradeId(_WITHDRAW, shortfall),
+                        block.timestamp,
+                        oraclePrice,
+                        0,
+                        oracleUpdatedAt
+                    )
+                );
+        }
         targets[3] = baseToken;
-        data[3] = abi.encodeCall(IERC20.approve, (address(pool), 0));
+        data[3] = abi.encodeCall(IERC20.approve, (swapTarget, 0));
+    }
+
+    /// @dev The Settler call for the swap a direct managed call would make, field for field: `limit` is the minimum
+    ///      output for exact input and the maximum input for exact output.
+    function _settlerSwap(
+        bool baseToQuote,
+        bool exactInput,
+        uint256 amount,
+        uint256 limit,
+        bytes32 tradeId,
+        uint256 oraclePrice,
+        uint256 oracleUpdatedAt
+    ) internal view returns (bytes memory) {
+        return abi.encodeCall(
+            ISettler.swap,
+            (
+                address(pool),
+                IManagedDirectPropAMM.SwapParams({
+                    pairIndex: pairIndex,
+                    baseToQuote: baseToQuote,
+                    exactInput: exactInput,
+                    amount: amount,
+                    limit: limit,
+                    sponsorId: sponsorId,
+                    customerId: customerId,
+                    tradeId: tradeId,
+                    deadline: block.timestamp,
+                    expectedOraclePrice: oraclePrice,
+                    oraclePriceToleranceBps: 0,
+                    minimumOracleUpdatedAt: oracleUpdatedAt
+                })
+            )
+        );
     }
 
     function _validate(address asset, uint256 amount) internal view {
