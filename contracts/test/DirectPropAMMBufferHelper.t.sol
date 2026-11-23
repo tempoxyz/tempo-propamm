@@ -767,6 +767,37 @@ contract FactoryPoolBufferHelperTest is Test {
         assertEq(helper.settler(), pool.settler());
     }
 
+    function test_factoryDepositRequiresAQuoteInTheRedemptionDirection() external {
+        DirectPropAMMBufferHelper helper = _helper(pool, vault, PARTNER);
+        uint256 first = PRICE * 10_040 / 10_000;
+        oracle.setPrice(first, block.timestamp);
+        _run(helper, vault, true, 105 * UNIT);
+        assertEq(pool.priceAnchor(PAIR, true), PRICE);
+        assertEq(pool.priceAnchor(PAIR, false), first);
+
+        uint256 next = PRICE * 10_080 / 10_000;
+        oracle.setPrice(next, block.timestamp);
+        pool.quoteExactInput(PAIR, address(vault), false, UNIT);
+        bytes memory exitError = abi.encodeWithSelector(
+            IManagedDirectPropAMM.PriceDeviationExceeded.selector, true, next, PRICE, uint256(50)
+        );
+        uint256[5] memory held = _holdings();
+        vm.expectRevert(exitError);
+        helper.getDepositManageCall(address(pathUsd), UNIT);
+        vm.expectRevert(exitError);
+        helper.getWithdrawManageCall(address(pathUsd), UNIT);
+        _assertNothingMoved(held);
+
+        pathUsd.mint(address(vault), UNIT);
+        (address[] memory targets,,) = helper.getWithdrawManageCall(address(pathUsd), UNIT);
+        assertEq(targets.length, 0);
+        _payOut(vault, pathUsd, UNIT);
+
+        pool.refreshPriceAnchor(PAIR, true, next, 0);
+        _run(helper, vault, true, UNIT);
+        _run(helper, vault, false, UNIT);
+    }
+
     /// @dev Both batches approve and call the Settler, never the pool, and the Settler's swap carries the fields the
     /// direct call carries: the twin's helper, built for the same vault, encodes the same values as a direct swap.
     function test_manageCallsApproveAndCallTheSettlerWithTheDirectSwapsFields() external {

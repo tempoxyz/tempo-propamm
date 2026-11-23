@@ -306,6 +306,12 @@ for the engine's Accountant-rate and measured-payout checks; they do not remove 
 
 ## Liquidity and failure behavior
 
+- Before investing a deposit through the factory Settler, the helper also asks the pool for a base-to-quote
+  exact-output quote for the deposit amount, using the vault as taker. This exercises the redemption direction's
+  oracle guard and fee quote. If either refuses, the Teller deposit reverts atomically. The quote reserves no
+  inventory. Monitor both directional anchors; after validating the oracle price independently, the owner can
+  call `refreshPriceAnchor(pairIndex, true, expectedPrice, toleranceBps)` on the live pair to restore a stale
+  redemption direction. Withdrawals covered by the vault's existing quote balance skip the pool.
 - Deposits consume PRIME from the DirectProp pool and add pathUSD to it.
 - Redemptions consume pathUSD from the pool and return PRIME to it.
 - The pool is permissioned inventory, not an LP vault; it must be sized for the largest supported
