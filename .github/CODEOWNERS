@@ -1,3 +1,2 @@
-# Every change needs approval from one of these Tempo engineers (enforced by the main branch ruleset
-# and Voight-Kampff's review.yml).
+# Default reviewers for changes across the repository.
 * @JasonwLi @Slokh @rkrasiuk
