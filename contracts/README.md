@@ -7,9 +7,9 @@ liquidity shares, bonding curve or public deposits. `DirectPropAMM` holds one pa
 and taker lists that sponsors manage for their own users. Inventory decides whether a trade settles,
 never its price.
 
-> **Status:** the managed pool core was audited by Sigma Prime at `0569025` ([audits](../audits/README.md));
+> **Status:** the managed pool core was audited by Sigma Prime at `0569025` ([audits](../audits/));
 > hook implementations and routers were not. `DirectPropAMM` and its buffer helper were reviewed separately in Sigma Prime's PropAMM & Earn
-> review (August 2026; see [audits](../audits/README.md)). There is no supported v1 deployment. Pools are immutable:
+> review (August 2026; see [audits](../audits/)). There is no supported v1 deployment. Pools are immutable:
 > the hook-based `ManagedDirectPropAMM` and caller-only managed Settler require new deployments, not upgrades.
 > The managed Settler ABI now requires `swap(pool, params)`; see [swap guide](src/managed/README.md#execute-a-swap).
 > The earlier managed-pool demo on the Moderato testnet uses pair-wide fees, not this version. No redeployment is recorded here.

@@ -4,7 +4,7 @@ Permissioned venues on Tempo where a market maker trades its own inventory with 
 liquidity providers, LP shares or public deposits: the maker funds and owns both sides, and the venue decides who may
 trade.
 
-> **Status:** v2 was audited by Sigma Prime ([audits](audits/README.md)) and its core is deployed on Tempo mainnet (see the
+> **Status:** v2 was audited by Sigma Prime ([audits](audits/)) and its core is deployed on Tempo mainnet (see the
 > [v2 guide](contracts/src/v2/README.md#deployments)). The managed pool core (`contracts/src/managed`) was audited by
 > Sigma Prime and is deployed on Tempo mainnet (see the [managed guide](contracts/src/managed/README.md#deployments));
 > each maker creates its own pool from the factory. `DirectPropAMM` and its buffer helper were reviewed by Sigma Prime with
@@ -86,10 +86,9 @@ summarizes the review. Routers, hook implementations and vault peripherals were 
 November 2026.
 
 Sigma Prime also reviewed the `DirectPropAMM` pool contract and its buffer helper in its PropAMM & Earn review (v2.0, August 2026), listed
-with Earn's audits in [tempoxyz/contracts](https://github.com/tempoxyz/contracts/blob/main/docs/earn/audit/README.md);
+with Earn's audits in [tempoxyz/contracts](https://github.com/tempoxyz/contracts/blob/main/docs/audits.md);
 later changes are not covered by it. The rebalance controller, the oracle adapters and `Registry` have not been
-audited. The reports are confidential and shared under NDA through [security@tempo.xyz](mailto:security@tempo.xyz); the
-[audits page](audits/README.md) gives their scope and SHA-256 digests.
+audited. The v2 and managed reports are published in [`audits/`](audits/).
 
 ## Repository
 

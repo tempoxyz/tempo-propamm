@@ -1,6 +1,6 @@
 # Managed propAMM — focused spec
 
-Status: audited by Sigma Prime ([audits](../audits/README.md)). Deployed code is immutable; owners manage pool configuration. Source revision: `0569025c72f3b569b2b981604245bfb8792adfe3`.
+Status: audited by Sigma Prime ([audits](../audits/)). Deployed code is immutable; owners manage pool configuration. Source revision: `0569025c72f3b569b2b981604245bfb8792adfe3`.
 
 The three core contracts are [ManagedDirectPropAMM](../contracts/src/managed/ManagedDirectPropAMM.sol),
 [Settler](../contracts/src/managed/Settler.sol) and

@@ -405,7 +405,7 @@ to recover their storage.
 ## Limits and risks
 
 Sigma Prime audited `contracts/src/v2` at commit `459ccf7`, and retested the fixes for all six findings (low and
-informational): see the [audits page](../../../audits/README.md).
+informational): see the [report](../../../audits/2026-10-sigma-prime-propamm-v2-v2.0.pdf).
 
 - **A mid band bounds price, not loss.** An updater that can also take (a contract updater, a batch transaction, or an
   accomplice the pair admits) can post at `minMid`, buy, post at `maxMid` and sell, losing up to
