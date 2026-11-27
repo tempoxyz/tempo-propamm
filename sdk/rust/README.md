@@ -1,7 +1,7 @@
 # propAMM Rust SDK
 
 Market-maker client for **propAMM v2**, the maker-posted ladder venue. v2's contracts were audited by
-Sigma Prime ([audits](https://github.com/tempoxyz/tempo-propamm/blob/main/audits/README.md); this SDK was
+Sigma Prime ([audits](https://github.com/tempoxyz/tempo-propamm/tree/main/audits); this SDK was
 not in scope). Its mainnet core is recorded in the contracts guide; supply your own verified venue,
 factory and chain. The SDK does not cover v1's oracle-priced pools. The
 [contracts guide](https://github.com/tempoxyz/tempo-propamm/blob/main/contracts/src/v2/README.md) explains

@@ -1,6 +1,6 @@
 # propAMM v2 — focused spec
 
-Status: implemented on the main branch and audited by Sigma Prime at commit `459ccf7` (all findings resolved; [audits](../audits/README.md)). The new `Registry` discovery sidecar is unaudited and not deployed; it is not covered by that historical audit. The contracts in `contracts/src/v2` and their NatSpec are the reference for exact behaviour; this spec gives the design and the reasons for it, and git history has its amendments. `contracts/src/v2/README.md` is the guide for makers, sponsors and takers, and `contracts/README.md` covers the v1 pools.
+Status: implemented on the main branch and audited by Sigma Prime at commit `459ccf7` (all findings resolved; [audits](../audits/)). The new `Registry` discovery sidecar is unaudited and not deployed; it is not covered by that historical audit. The contracts in `contracts/src/v2` and their NatSpec are the reference for exact behaviour; this spec gives the design and the reasons for it, and git history has its amendments. `contracts/src/v2/README.md` is the guide for makers, sponsors and takers, and `contracts/README.md` covers the v1 pools.
 
 ## Goals and non-goals
 

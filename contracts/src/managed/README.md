@@ -10,7 +10,7 @@ This guide covers integration with three core contracts: `ManagedDirectPropAMM`,
 [managed specification](../../../spec/propamm-managed.md) explains the design and invariants.
 
 **Status:** these three contracts and their interfaces were audited by Sigma Prime at commit `0569025`, with no
-vulnerabilities found ([audits](../../../audits/README.md)).
+vulnerabilities found ([audits](../../../audits/)).
 Routers and hook implementations were out of scope. Deployed code is immutable; owners manage pool configuration.
 
 ## Deployments

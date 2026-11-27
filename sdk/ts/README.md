@@ -16,7 +16,7 @@ It is built on [viem](https://viem.sh) and follows `viem/tempo`'s action convent
 variables and sends nothing on its own: viem accounts sign.
 
 > **Audited.** propAMM v2's contracts were audited by Sigma Prime
-> ([audits](https://github.com/tempoxyz/tempo-propamm/blob/main/audits/README.md)); this SDK was not in scope.
+> ([audits](https://github.com/tempoxyz/tempo-propamm/tree/main/audits)); this SDK was not in scope.
 > The SDK ships no deployment addresses: supply a factory you verified,
 > and check every venue against it with `Info.isVenue` before you trust it.
 

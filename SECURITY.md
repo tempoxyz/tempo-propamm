@@ -39,5 +39,4 @@ These contracts have no bug bounty.
 
 ## Audits
 
-The [audits page](audits/README.md) lists completed audits and what they cover. The reports are confidential; Tempo
-shares them under NDA through security@tempo.xyz.
+Completed audit reports are published in [`audits/`](audits/).
